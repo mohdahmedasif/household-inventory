@@ -1,0 +1,33 @@
+name: Bug report
+description: Something is broken or unexpected
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do **not** paste bot tokens, Gemini keys, `credentials.json`, spreadsheet IDs, or real inventory rows.
+        Use a made-up example if you need to show a message or sheet row.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you do, and what went wrong?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Python version
+      placeholder: "3.11"
+  - type: textarea
+    id: context
+    attributes:
+      label: Extra context
+      description: Fake Telegram message, UI path, or error text (secrets redacted).

@@ -1,0 +1,35 @@
+name: Feature request
+description: An idea or improvement
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: Do **not** include tokens, credentials, spreadsheet IDs, or real inventory data.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What is hard or missing today?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Idea
+      description: What would you like Relay to do?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - New automation
+        - Household inventory bot
+        - Google Sheets
+        - Gemini / photo add
+        - Relay web UI
+        - Deploy
+        - Docs
+        - Other

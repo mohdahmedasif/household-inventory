@@ -1,5 +1,11 @@
 # Relay — Telegram Automation Hub
 
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3D6B4F" alt="MIT License"></a>
+  <img src="https://img.shields.io/badge/python-%3E%3D3.11-3776AB" alt="Python 3.11+">
+  <a href="https://github.com/mohdahmedasif/telegram-automation/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22"><img src="https://img.shields.io/badge/good%20first%20issue-welcome-7057ff" alt="Good first issues"></a>
+</p>
+
 Open-source personal automation hub for Telegram bots backed by **Google Sheets** and **Google Gemini**.
 
 Run a local web UI to start/stop automations. Each automation is its own Telegram bot with its own spreadsheet (and optional worksheet tab).
@@ -73,7 +79,7 @@ INVENTORY_SPREADSHEET_ID=...
 
 `INVENTORY_ALLOWED_USER_IDS` restricts the bot to specific Telegram accounts (comma-separated numeric user ids — message [@userinfobot](https://t.me/userinfobot) to get yours). **Leave it unset and anyone who finds the bot can use it.**
 
-Never commit `.env` or `credentials.json` — they are gitignored.
+Never commit `.env` or `credentials.json` — they are gitignored. Do not paste bot tokens, service-account JSON, spreadsheet IDs, or Telegram user IDs into issues or pull requests.
 
 ## Telegram commands
 
@@ -157,6 +163,12 @@ Manual on the server:
 ```bash
 bash scripts/deploy.sh
 ```
+
+## Contributing
+
+Issues and pull requests are welcome. See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup, the secrets rule, and how to add another automation.
+
+Browse [good first issues](https://github.com/mohdahmedasif/telegram-automation/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) if you want a small place to start.
 
 ## License
 
