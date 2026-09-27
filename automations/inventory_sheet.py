@@ -49,6 +49,10 @@ COL_EXPIRY_DATE = 11
 COL_NOTES = 12
 COL_LAST_UPDATED = 13
 
+# Only these columns are inventory data. Extra blank headers to the right
+# (N, O, …) make gspread get_all_records() fail on duplicate ''.
+SHEET_RANGE = "A:M"
+
 # Google Sheets serial dates count days from this epoch (same as Excel).
 _SHEETS_EPOCH = date(1899, 12, 30)
 
@@ -489,10 +493,13 @@ class InventorySheet:
         return sheet
 
     def get_all_records(self) -> list[dict[str, Any]]:
-        records = self.worksheet.get_all_records()
+        rows = self.worksheet.get(SHEET_RANGE)
         inventory: list[dict[str, Any]] = []
-        for index, record in enumerate(records):
-            entry = dict(record)
+        for index, row in enumerate(rows[1:]):
+            padded = list(row) + [""] * (len(SHEET_HEADERS) - len(row))
+            if not any(str(cell).strip() for cell in padded[: len(SHEET_HEADERS)]):
+                continue
+            entry = {header: padded[i] for i, header in enumerate(SHEET_HEADERS)}
             entry["row_index"] = index + 2
             entry["last_updated"] = coerce_sheet_date(entry.get("last_updated"))
             entry["expiry_date"] = coerce_sheet_date(entry.get("expiry_date"))
