@@ -54,8 +54,10 @@ COL_LAST_UPDATED = 13
 SHEET_RANGE = "A:M"
 
 # Monotonic item_id high-water mark (never reused after delete).
-# Kept outside A:M so it is not treated as inventory data.
-ID_SEQ_CELL = "AA1"
+# Column N sits just past the inventory table. The sheet grid is often
+# only 13 columns wide, so AA1 cannot be written without resizing.
+ID_SEQ_CELL = "N1"
+ID_SEQ_COLS = 14
 
 # Google Sheets serial dates count days from this epoch (same as Excel).
 _SHEETS_EPOCH = date(1899, 12, 30)
@@ -524,11 +526,18 @@ class InventorySheet:
                 max_id = max(max_id, parsed)
         return max_id
 
+    def _ensure_id_seq_cell(self) -> None:
+        missing = ID_SEQ_COLS - int(self.worksheet.col_count)
+        if missing > 0:
+            self.worksheet.add_cols(missing)
+
     def _id_high_water(self) -> int:
+        self._ensure_id_seq_cell()
         parsed = self._parse_item_id(self.worksheet.acell(ID_SEQ_CELL).value)
         return parsed if parsed is not None else 0
 
     def _set_id_high_water(self, item_id: int) -> None:
+        self._ensure_id_seq_cell()
         self.worksheet.update_acell(ID_SEQ_CELL, item_id)
 
     def next_item_id(self) -> int:
