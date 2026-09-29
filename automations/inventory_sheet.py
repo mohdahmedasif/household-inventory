@@ -53,6 +53,10 @@ COL_LAST_UPDATED = 13
 # (N, O, …) make gspread get_all_records() fail on duplicate ''.
 SHEET_RANGE = "A:M"
 
+# Monotonic item_id high-water mark (never reused after delete).
+# Kept outside A:M so it is not treated as inventory data.
+ID_SEQ_CELL = "AA1"
+
 # Google Sheets serial dates count days from this epoch (same as Excel).
 _SHEETS_EPOCH = date(1899, 12, 30)
 
@@ -506,15 +510,35 @@ class InventorySheet:
             inventory.append(entry)
         return inventory
 
-    def next_item_id(self) -> int:
-        values = self.worksheet.col_values(COL_ITEM_ID)[1:]
+    def _parse_item_id(self, raw: Any) -> int | None:
+        try:
+            return int(str(raw or "").strip())
+        except (TypeError, ValueError):
+            return None
+
+    def _max_column_a_id(self) -> int:
         max_id = 0
-        for raw in values:
-            try:
-                max_id = max(max_id, int(str(raw).strip()))
-            except (TypeError, ValueError):
-                continue
-        return max_id + 1
+        for raw in self.worksheet.col_values(COL_ITEM_ID)[1:]:
+            parsed = self._parse_item_id(raw)
+            if parsed is not None:
+                max_id = max(max_id, parsed)
+        return max_id
+
+    def _id_high_water(self) -> int:
+        parsed = self._parse_item_id(self.worksheet.acell(ID_SEQ_CELL).value)
+        return parsed if parsed is not None else 0
+
+    def _set_id_high_water(self, item_id: int) -> None:
+        self.worksheet.update_acell(ID_SEQ_CELL, item_id)
+
+    def next_item_id(self) -> int:
+        """Next unused id: never reuse a deleted (or previously issued) id."""
+        return max(self._max_column_a_id(), self._id_high_water()) + 1
+
+    def _next_data_row(self) -> int:
+        """First empty row after the A:M table (ignores stray cells in N+)."""
+        rows = self.worksheet.get(SHEET_RANGE)
+        return len(rows) + 1
 
     def append_item(self, item: dict[str, Any]) -> list[Any]:
         """`item` holds every header except `item_id`/`last_updated`, which are stamped here."""
@@ -524,7 +548,15 @@ class InventorySheet:
         for header in SHEET_HEADERS[1:-1]:
             row.append(item.get(header, ""))
         row.append(last_updated)
-        self.worksheet.append_row(row, value_input_option="USER_ENTERED")
+        # Write A:M explicitly. worksheet.append_row() auto-detects a "table"
+        # and, when extra columns exist, can drop the new row starting at N/O.
+        next_row = self._next_data_row()
+        self.worksheet.update(
+            range_name=f"A{next_row}:M{next_row}",
+            values=[row],
+            value_input_option="USER_ENTERED",
+        )
+        self._set_id_high_water(item_id)
         return row
 
     def get_package_count(self, row_index: int) -> int:
