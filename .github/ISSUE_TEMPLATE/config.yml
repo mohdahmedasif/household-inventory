@@ -1,5 +1,5 @@
 blank_issues_enabled: true
 contact_links:
   - name: Security report
-    url: https://github.com/mohdahmedasif/telegram-automation/security/advisories/new
-    about: Private report — never paste bot tokens, credentials.json, or spreadsheet IDs here.
+    url: https://github.com/mohdahmedasif/household-inventory/security/advisories/new
+    about: Private report — never paste API keys here.

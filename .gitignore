@@ -6,14 +6,6 @@ credentials.json
 **/settings.yaml
 **/settings.local.yaml
 
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-.venv/
-venv/
-.env/
-
 # IDE / OS
 .idea/
 .vscode/
@@ -27,3 +19,18 @@ Thumbs.db
 
 # Local process fallback from scripts/restart.sh
 run/
+
+# Node
+node_modules/
+client/dist/
+server/dist/
+
+# UI screenshot scratch
+tmp/
+
+# Inventory SQLite
+data/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm

@@ -1,15 +1,13 @@
 # Security
 
-Relay stores Telegram bot tokens, a Gemini API key, and a Google service-account JSON on the machine that runs it. Treat those like passwords.
+Household Inventory stores a Gemini API key (optional) and an inventory API key on the machine that runs it. Treat those like passwords. Inventory rows live in a local SQLite file.
 
 ## Do not file in public issues
 
-- Bot tokens or Gemini keys
-- `credentials.json` / service-account JSON
-- Spreadsheet IDs, worksheet gids, or Telegram user IDs
-- Photos or rows from a real inventory sheet
+- Gemini keys or `INVENTORY_API_KEY`
+- Photos or rows from a real inventory
 - `.env` contents or deploy SSH keys
 
 ## Report a vulnerability
 
-Use [GitHub private vulnerability reporting](https://github.com/mohdahmedasif/telegram-automation/security/advisories/new) so tokens and sheet details stay off the public issue tracker.
+Use [GitHub private vulnerability reporting](https://github.com/mohdahmedasif/household-inventory/security/advisories/new) so tokens and inventory details stay off the public issue tracker.

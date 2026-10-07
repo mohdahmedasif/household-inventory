@@ -8,5 +8,5 @@
 
 ## Privacy
 
-- [ ] No `.env`, bot tokens, `credentials.json`, or spreadsheet IDs are in this PR
+- [ ] No `.env` or API keys are in this PR
 - [ ] Fixtures (if any) use fake items and placeholder secrets

@@ -1,0 +1,17 @@
+[Unit]
+Description=Household Inventory API + web UI
+After=network.target
+
+[Service]
+Type=simple
+User=REPLACE_USER
+WorkingDirectory=/REPLACE/PATH/household-inventory/server
+EnvironmentFile=/REPLACE/PATH/household-inventory/.env
+Environment=NODE_ENV=production
+Environment=INVENTORY_DATA_DIR=/REPLACE/PATH/household-inventory/data
+ExecStart=/usr/bin/node src/index.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

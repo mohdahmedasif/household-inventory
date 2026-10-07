@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pull latest main, install deps, restart Relay.
+# Pull latest main, install deps, rebuild the SPA, restart the inventory API.
 # Used by GitHub Actions (SSH) and safe to run manually on the VPS:
 #   bash scripts/deploy.sh
 set -euo pipefail
@@ -7,10 +7,10 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-BRANCH="${RELAY_DEPLOY_BRANCH:-main}"
+BRANCH="${DEPLOY_BRANCH:-main}"
 OWNER="$(stat -c '%U' "$ROOT")"
 
-echo "==> Deploying Relay in $ROOT (branch: $BRANCH)"
+echo "==> Deploying Household Inventory in $ROOT (branch: $BRANCH)"
 
 if [ ! -d .git ]; then
   echo "ERROR: $ROOT is not a git repository."
@@ -29,19 +29,16 @@ if [ "$(id -u)" -eq 0 ] && [ "$OWNER" != "root" ]; then
   chown -R "${OWNER}:${OWNER}" "$ROOT/.git" || true
 fi
 
-echo "==> Python dependencies"
-if [ -d .venv ]; then
-  # shellcheck disable=SC1091
-  . .venv/bin/activate
-elif [ -f venv/bin/activate ]; then
-  # shellcheck disable=SC1091
-  . venv/bin/activate
-else
-  echo "WARN: no .venv found — using system Python"
+echo "==> Inventory UI + API (Node)"
+if ! command -v npm >/dev/null 2>&1; then
+  echo "ERROR: npm not found"
+  exit 1
 fi
 
-python -m pip install --upgrade pip
-pip install -r requirements.txt
+npm --prefix "$ROOT/server" install --omit=dev
+npm --prefix "$ROOT/client" install
+npm --prefix "$ROOT/client" run build
+node "$ROOT/scripts/copy-client-dist.cjs"
 
 echo "==> Restart"
 bash "$ROOT/scripts/restart.sh"

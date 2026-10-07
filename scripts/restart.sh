@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Restart Relay via systemd when available; otherwise fall back to a pid file.
+# Restart the inventory API + web UI (systemd when available).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -21,24 +21,17 @@ restart_unit() {
   return 1
 }
 
-if restart_unit telegram-relay.service || restart_unit relay.service; then
+if restart_unit inventory.service || restart_unit telegram-inventory.service; then
   exit 0
 fi
 
-mkdir -p "$ROOT/run"
-if [ -f "$ROOT/run/relay.pid" ] && kill -0 "$(cat "$ROOT/run/relay.pid")" 2>/dev/null; then
-  kill "$(cat "$ROOT/run/relay.pid")" || true
-  sleep 1
+if command -v docker >/dev/null 2>&1 && docker compose ps --status running 2>/dev/null | grep -q inventory; then
+  docker compose up -d --build inventory
+  echo "Restarted Docker Compose inventory service"
+  exit 0
 fi
 
-if [ -d .venv ]; then
-  # shellcheck disable=SC1091
-  . .venv/bin/activate
-elif [ -f venv/bin/activate ]; then
-  # shellcheck disable=SC1091
-  . venv/bin/activate
-fi
-
-nohup python main.py >"$ROOT/run/relay.log" 2>&1 &
-echo $! >"$ROOT/run/relay.pid"
-echo "Relay restarted (pid $(cat "$ROOT/run/relay.pid"))"
+echo "No inventory.service unit or running Compose service found."
+echo "Start with: npm start   (after npm run build)"
+echo "Or:         docker compose up -d --build"
+exit 1

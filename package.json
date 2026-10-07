@@ -1,0 +1,14 @@
+{
+  "name": "household-inventory",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -n api,ui -c blue,green \"npm --prefix server run dev\" \"npm --prefix client run dev\"",
+    "build": "npm --prefix client run build && node scripts/copy-client-dist.cjs",
+    "start": "npm --prefix server start",
+    "install:all": "npm --prefix server install && npm --prefix client install",
+    "import:sheet": "node scripts/import-sheet-csv.mjs"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.0"
+  }
+}

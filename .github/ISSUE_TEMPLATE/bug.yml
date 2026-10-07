@@ -6,8 +6,8 @@ body:
   - type: markdown
     attributes:
       value: |
-        Do **not** paste bot tokens, Gemini keys, `credentials.json`, spreadsheet IDs, or real inventory rows.
-        Use a made-up example if you need to show a message or sheet row.
+        Do **not** paste Gemini keys, API keys, or real inventory rows.
+        Use a made-up example if you need to show a path or item.
   - type: textarea
     id: what-happened
     attributes:
@@ -24,10 +24,10 @@ body:
   - type: input
     id: version
     attributes:
-      label: Python version
-      placeholder: "3.11"
+      label: Node.js version
+      placeholder: "20"
   - type: textarea
     id: context
     attributes:
       label: Extra context
-      description: Fake Telegram message, UI path, or error text (secrets redacted).
+      description: UI path, browser, or error text (secrets redacted).

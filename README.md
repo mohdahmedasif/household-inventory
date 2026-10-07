@@ -1,140 +1,138 @@
-# Relay — Telegram Automation Hub
+# Household Inventory
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3D6B4F" alt="MIT License"></a>
-  <img src="https://img.shields.io/badge/python-%3E%3D3.11-3776AB" alt="Python 3.11+">
-  <a href="https://github.com/mohdahmedasif/telegram-automation/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22"><img src="https://img.shields.io/badge/good%20first%20issue-welcome-7057ff" alt="Good first issues"></a>
+  <img src="https://img.shields.io/badge/node-%3E%3D20-339933" alt="Node 20+">
+  <a href="https://github.com/mohdahmedasif/household-inventory/issues?q=is%3Aissue+is%3Aopen+label%3A%22good%20first%20issue%22"><img src="https://img.shields.io/badge/good%20first%20issue-welcome-7057ff" alt="Good first issues"></a>
 </p>
 
-Open-source personal automation hub for Telegram bots backed by **Google Sheets** and **Google Gemini**.
+Open-source household pantry app: a **React** web UI backed by **SQLite**, an **Express** API, and optional **Google Gemini** photo extract.
 
-Run a local web UI to start/stop automations. Each automation is its own Telegram bot with its own spreadsheet (and optional worksheet tab).
+In development Vite proxies `/api` to Express. In Docker (and production) Express serves the built SPA and the REST API from one process.
 
 ## Features
 
-| Automation | What it does |
-|------------|----------------|
-| **Household Inventory** | One bot for pantry groceries and medicine/supplements in a single Google Sheet. Add items from text or photos — Gemini figures out the category; `/search` matches by name, brand, category, or (for medicine) symptoms (e.g. `headache` → paracetamol). Adding is conversational: Gemini fills what it can, the bot asks only for blank/important fields, then you confirm a recap (or type `change location` to reopen that picker). |
+- Track products and purchase batches (count, location, size, expiry)
+- Search and filter the pantry; overview charts and a spreadsheet-style report
+- Add from a photo — Gemini fills the form for review
+- Editable catalog lists (categories, locations, package types)
+- Import from a Google Sheets CSV export
 
 ## Architecture
 
 ```text
-main.py                    → starts the Relay web UI
-app/registry.py            → registers automations
-app/web/                   → FastAPI UI (list + Start/Stop)
-automations/base.py        → shared Automation contract
-automations/inventory_sheet.py → shared sheet schema + gspread I/O
-automations/inventory/     → household inventory Telegram bot
+server/     → Express + SQLite REST API (`/api`), serves `dist` in production
+client/     → React 19 / Vite / Ant Design SPA
+scripts/    → deploy, sheet import, UI screenshots
+deploy/     → systemd unit for the Node API
 ```
-
-Add a new bot by implementing `Automation` under `automations/` and registering it in `app/registry.py`.
 
 ## Requirements
 
-- Python 3.11+
-- Telegram bots from [@BotFather](https://t.me/BotFather)
-- [Google AI Studio](https://aistudio.google.com/) Gemini API key
-- Google Cloud **service account** JSON with access to your spreadsheet(s)
+- Node.js 20+
+- Optional: [Google AI Studio](https://aistudio.google.com/) Gemini API key (photo extract)
 
 ## Quick start
 
 ```bash
-git clone https://github.com/mohdahmedasif/telegram-automation.git
-cd telegram-automation
-python -m venv .venv
-
-# Windows
-.venv\Scripts\activate
-# macOS / Linux
-# source .venv/bin/activate
-
-pip install -r requirements.txt
+git clone https://github.com/mohdahmedasif/household-inventory.git
+cd household-inventory
 copy .env.example .env   # or: cp .env.example .env
+npm install
+npm run install:all
 ```
 
-1. Place your service-account key at `credentials.json` (or set `CREDENTIALS_PATH`).
-2. Share each Google Sheet with the service account `client_email` (Editor).
-3. Fill `.env` (see below).
-4. Start the hub:
+Fill `.env` (see below), then:
 
 ```bash
-python main.py
+npm run dev
 ```
 
-Open **http://127.0.0.1:8765**, then **Start** an automation.
+Open **http://127.0.0.1:5173** (Vite proxies `/api` to Express on `:3000`).
+
+Production-style (Express serves the built SPA):
+
+```bash
+npm run build
+npm start
+```
+
+Then open **http://127.0.0.1:3000**.
+
+### Docker
+
+```bash
+docker compose up --build
+```
+
+Express serves the Vite bundle from `dist`; SQLite lives in the `household-inventory-data` volume. Host port defaults to 3000; set `INVENTORY_HOST_PORT` to use another one.
 
 ## Configuration
 
-Copy `.env.example` → `.env`. Optional `INVENTORY_WORKSHEET_GID` selects a tab inside the spreadsheet (the `gid=` value from the Sheets URL).
+Copy `.env.example` → `.env`.
 
 ```env
 GEMINI_API_KEY=...
-CREDENTIALS_PATH=credentials.json
-
-INVENTORY_TELEGRAM_BOT_TOKEN=...
-INVENTORY_SPREADSHEET_ID=...
-# INVENTORY_WORKSHEET_GID=...
-# INVENTORY_ALLOWED_USER_IDS=123456789,987654321
+INVENTORY_API_KEY=choose-a-long-random-string
+# INVENTORY_HOST_PORT=3030
 ```
 
-`INVENTORY_ALLOWED_USER_IDS` restricts the bot to specific Telegram accounts (comma-separated numeric user ids — message [@userinfobot](https://t.me/userinfobot) to get yours). **Leave it unset and anyone who finds the bot can use it.**
+`INVENTORY_API_KEY` protects the REST API and web UI (`Authorization: Bearer …`). If unset, the API is open on that host.
 
-Never commit `.env` or `credentials.json` — they are gitignored. Do not paste bot tokens, service-account JSON, spreadsheet IDs, or Telegram user IDs into issues or pull requests.
+Never commit `.env` — it is gitignored. Do not paste API keys into issues or pull requests.
 
-## Telegram commands
+## Inventory schema
 
-| Command | Description |
-|---------|-------------|
-| `/add <item>` | Add an item — text or photo. Also works without the command: just describe what you got and the bot starts the same conversation. |
-| `/search <name\|brand\|category\|symptom>` | e.g. `/search pasta`, `/search headache`, `/search nexpro` |
-| `/edit <query>` | Adjust count or delete |
-| `/list` | Recent items |
-| `/cancel` | Cancel an in-progress add |
+Inventory is modeled as **products**, **companies**, and **purchase batches**:
 
-Adding is a short conversation: describe the item (or send a photo), the bot fills what it can, then asks only for blank or important fields (buttons + Skip). After that it shows a one-message recap. Reply with a correction in plain English (e.g. `make it 2 bottles`), type `change location` to reopen that picker, or tap **Save**/**Cancel**.
+| Entity | Meaning |
+|--------|---------|
+| **Product** | The thing you stock (matched by normalized name + category) |
+| **Company** | Brand / manufacturer on a purchase |
+| **Batch** | One purchase/lot — count on hand, location, size, expiry, acquired date |
 
-## Google Sheet schema
+- Same product bought twice (even from different companies) stays one product with two batches.
+- **Times purchased** = number of batches. **On hand** = sum of batch `package_count`.
+- Sheet CSV `item_id` is kept as `batch_id` (deleted ids are never reused). Sheet `brand` becomes the company; `last_updated` becomes `acquired_on`.
+- Categories / locations / package types are editable catalog lists.
 
-One shared tab covers both groceries and medicine/supplements via the `category` column:
+### Import from Google Sheets
 
-`item_id, name, brand, category, location, package_type, package_count, units_per_package, size_value, size_unit, expiry_date, notes, last_updated`
+1. Open the sheet tab → **File → Download → Comma Separated Values (.csv)**
+2. Save as `data/inventory-export.csv` (or paste into the web **Import** page)
+3. Run:
 
-- `category` dropdown: `Grains & Rice, Canned Goods, Pasta & Noodles, Seasonings & Spices, Beverages, Medicine, Supplement`
-- `location` dropdown: `Sofa Storage, Kitchen Cabinet, Basement, Washroom Cabinet`
-- `package_type` dropdown: `Tablet Strip, Bottle, Flask, Box, Sachet, Jar, Can, Pack, Loose`
-- `item_id` and `last_updated` are bot-assigned (sequential id, today's date) — everything else comes from Gemini extraction or your corrections.
-- For medicine, symptom/purpose text lives in `notes`; `/search` matches on `name`, `brand`, `category`, and `notes`, so a query like `headache` or `pantoprazole` still finds the right row.
-- Optional formula columns (days-until-expiry, reorder status) can live in the sheet; the bot never writes them.
+```bash
+npm run import:sheet
+# or: node scripts/import-sheet-csv.mjs path/to/export.csv
+```
 
-Row 1 = headers; data starts at row 2.
-
-## Adding another automation
-
-1. Create `automations/your_bot/` with an `Automation` subclass.
-2. Register it in `app/registry.py`.
-3. Document its `YOURBOT_*` env vars in `.env.example`.
-
-It will appear automatically in the Relay UI.
+Rows with the same name + category collapse into one product; each row becomes a purchase batch.
 
 ## Auto-deploy (GitHub Actions → VPS over SSH)
 
 On every push to `main`, GitHub SSHs into your VPS and runs [`scripts/deploy.sh`](scripts/deploy.sh)
-(git pull → pip install → restart).
+(git pull → install deps → build the SPA → restart).
 
 ### 1. One-time: app on the VPS
 
 ```bash
-git clone https://github.com/mohdahmedasif/telegram-automation.git
-cd telegram-automation
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-cp .env.example .env   # fill secrets + credentials.json
+git clone https://github.com/mohdahmedasif/household-inventory.git
+cd household-inventory
+cp .env.example .env   # fill secrets
+npm run install:all
+npm run build
 
-sudo cp deploy/relay.service /etc/systemd/system/relay.service
+sudo cp deploy/inventory.service /etc/systemd/system/inventory.service
 # edit User= / paths
 sudo systemctl daemon-reload
-sudo systemctl enable --now relay
+sudo systemctl enable --now inventory
+```
+
+Or with Docker:
+
+```bash
+docker compose up -d --build
 ```
 
 Make sure your deploy public key is in `~/.ssh/authorized_keys` on the VPS.
@@ -151,7 +149,7 @@ Make sure your deploy public key is in `~/.ssh/authorized_keys` on the VPS.
 
 ```powershell
 # Windows — set key from file (no paste)
-Get-Content -Raw $env:USERPROFILE\.ssh\github-actions | gh secret set DEPLOY_SSH_KEY --repo mohdahmedasif/telegram-automation
+Get-Content -Raw $env:USERPROFILE\.ssh\github-actions | gh secret set DEPLOY_SSH_KEY --repo mohdahmedasif/household-inventory
 ```
 
 ### 3. Deploy
@@ -166,9 +164,9 @@ bash scripts/deploy.sh
 
 ## Contributing
 
-Issues and pull requests are welcome. See [CONTRIBUTING.md](./CONTRIBUTING.md) for setup, the secrets rule, and how to add another automation.
+Issues and pull requests are welcome. See [CONTRIBUTING.md](./CONTRIBUTING.md).
 
-Browse [good first issues](https://github.com/mohdahmedasif/telegram-automation/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) if you want a small place to start.
+Browse [good first issues](https://github.com/mohdahmedasif/household-inventory/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) if you want a small place to start.
 
 ## License
 
