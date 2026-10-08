@@ -160,6 +160,7 @@ export default function ImportPage() {
         size="small"
         rowKey="key"
         pagination={{ pageSize: 8 }}
+        scroll={{ x: 520 }}
         dataSource={collapsed}
         columns={[
           { title: "Product", dataIndex: "name" },

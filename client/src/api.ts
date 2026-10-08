@@ -262,6 +262,19 @@ export function mergeProduct(sourceId: number, intoId: number) {
   });
 }
 
+export type StockEvent = {
+  event_id: number;
+  batch_id: number | null;
+  kind: "purchase" | "used" | "added" | "removed";
+  delta: number;
+  count_after: number;
+  created_at: string;
+};
+
+export function fetchProductEvents(id: number) {
+  return request<{ events: StockEvent[] }>(`/api/products/${id}/events`);
+}
+
 export function deleteProduct(id: number) {
   return request<{ ok: boolean; product_id: number }>(`/api/products/${id}`, {
     method: "DELETE",

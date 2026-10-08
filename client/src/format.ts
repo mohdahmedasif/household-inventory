@@ -64,18 +64,6 @@ export function emptyProductInput(settings?: Partial<Settings> | null): ProductC
   };
 }
 
-export const BATCH_NOTE_SUGGESTIONS = [
-  "Whole",
-  "Sliced",
-  "Chopped",
-  "Diced",
-  "Crushed",
-  "Baked",
-  "Organic",
-  "Low salt",
-  "No added sugar",
-];
-
 export function emptyBatchInput(settings?: Partial<Settings> | null) {
   return {
     company: "",

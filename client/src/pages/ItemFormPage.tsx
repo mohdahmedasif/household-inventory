@@ -3,7 +3,6 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
   App as AntdApp,
-  AutoComplete,
   Button,
   Card,
   DatePicker,
@@ -23,6 +22,7 @@ import {
   ArrowLeftOutlined,
   CameraOutlined,
   ClockCircleOutlined,
+  CopyOutlined,
   DeleteOutlined,
   EditOutlined,
   MergeCellsOutlined,
@@ -35,13 +35,13 @@ import type { Dayjs } from "dayjs";
 import type { ColumnsType } from "antd/es/table";
 import {
   addBatch,
-  adjustBatchCount,
   createProduct,
   deleteBatch,
   deleteProduct,
   extractFromImage,
   fetchCatalog,
   fetchProduct,
+  fetchProductEvents,
   fetchProducts,
   fetchSimilarProducts,
   mergeProduct,
@@ -53,9 +53,9 @@ import {
   type ProductCreateInput,
   type ProductSummary,
   type SimilarProduct,
+  type StockEvent,
 } from "../api";
 import {
-  BATCH_NOTE_SUGGESTIONS,
   emptyBatchInput,
   emptyProductInput,
   expiryLabel,
@@ -86,6 +86,13 @@ type NewProductForm = ProductCreateInput & {
   expiry?: Dayjs | null;
 };
 
+const EVENT_LABELS: Record<StockEvent["kind"], string> = {
+  purchase: "Purchased",
+  used: "Used",
+  added: "Count raised",
+  removed: "Batch deleted",
+};
+
 export default function ItemFormPage() {
   const { id } = useParams();
   const isNew = !id || id === "new";
@@ -112,6 +119,8 @@ export default function ItemFormPage() {
   const [photoPreview, setPhotoPreview] = useState("");
   const [photoCaption, setPhotoCaption] = useState("");
   const [extracting, setExtracting] = useState(false);
+  const [events, setEvents] = useState<StockEvent[]>([]);
+  const addAnother = useRef(false);
   usePageTitle(editing ? product?.name : undefined);
 
   useEffect(() => {
@@ -124,6 +133,7 @@ export default function ItemFormPage() {
     if (photoPreview) URL.revokeObjectURL(photoPreview);
     setPhotoFile(file);
     setPhotoPreview(URL.createObjectURL(file));
+    void onExtractPhoto(file);
   }
 
   function clearPhoto() {
@@ -132,14 +142,14 @@ export default function ItemFormPage() {
     setPhotoPreview("");
   }
 
-  async function onExtractPhoto() {
-    if (!photoFile) {
+  async function onExtractPhoto(file: File | null = photoFile) {
+    if (!file) {
       message.warning("Choose a photo first");
       return;
     }
     setExtracting(true);
     try {
-      const { item } = await extractFromImage(photoFile, photoCaption);
+      const { item } = await extractFromImage(file, photoCaption);
       newForm.setFieldsValue({
         ...item,
         expiry: item.expiry_date ? dayjs(item.expiry_date) : null,
@@ -193,7 +203,11 @@ export default function ItemFormPage() {
   }
 
   async function reload(idToLoad: number) {
-    const data = await fetchProduct(idToLoad);
+    const [data, history] = await Promise.all([
+      fetchProduct(idToLoad),
+      fetchProductEvents(idToLoad).catch(() => ({ events: [] })),
+    ]);
+    setEvents(history.events);
     setProduct(data);
     productForm.setFieldsValue({
       name: data.name,
@@ -251,10 +265,31 @@ export default function ItemFormPage() {
     };
   }
 
+  // "Save & add another" keeps the form open for the next item.
+  function resetForNext() {
+    clearPhoto();
+    setPhotoCaption("");
+    setSimilar([]);
+    newForm.resetFields();
+    newForm.setFieldsValue({
+      ...emptyProductInput(),
+      category: catalog?.defaults?.category ?? "Canned Goods",
+      location: catalog?.defaults?.location ?? "Kitchen Cabinet",
+      package_type: catalog?.defaults?.package_type ?? "Pack",
+    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
   async function onCreate(values: NewProductForm) {
+    const stay = addAnother.current;
+    addAnother.current = false;
     try {
       const created = await createProduct(buildNewBody(values));
-      message.success("Added");
+      message.success(`Added ${created.name}`);
+      if (stay) {
+        resetForNext();
+        return;
+      }
       navigate(`/products/${created.product_id}`, { replace: true });
     } catch (err) {
       message.error(err instanceof Error ? err.message : "Save failed");
@@ -281,11 +316,39 @@ export default function ItemFormPage() {
 
   function openAddBatch() {
     setEditingBatch(null);
+    // Buying again: start from the latest purchase so only count and expiry need typing.
+    const last = [...(product?.batches ?? [])].sort(
+      (a, b) => b.acquired_on.localeCompare(a.acquired_on) || b.batch_id - a.batch_id,
+    )[0];
     batchForm.setFieldsValue({
       ...emptyBatchInput(),
-      location: catalog?.defaults?.location ?? "Kitchen Cabinet",
-      package_type: catalog?.defaults?.package_type ?? "Pack",
+      company: last?.company ?? "",
+      location: last?.location || (catalog?.defaults?.location ?? "Kitchen Cabinet"),
+      package_type: last?.package_type || (catalog?.defaults?.package_type ?? "Pack"),
+      units_per_package: last?.units_per_package ?? "",
+      size_value: last?.size_value ?? "",
+      size_unit: last?.size_unit ?? "",
+      package_count: 1,
+      notes: "",
       expiry: null,
+      acquired: dayjs(),
+    });
+    setBatchModalOpen(true);
+  }
+
+  // Copy a purchase row into a new purchase, dated today, ready to adjust and save.
+  function openCopyBatch(batch: Batch) {
+    setEditingBatch(null);
+    batchForm.setFieldsValue({
+      company: batch.company,
+      location: batch.location,
+      package_type: batch.package_type,
+      package_count: batch.package_count || 1,
+      units_per_package: batch.units_per_package,
+      size_value: batch.size_value,
+      size_unit: batch.size_unit,
+      notes: batch.notes,
+      expiry: batch.expiry_date ? dayjs(batch.expiry_date) : null,
       acquired: dayjs(),
     });
     setBatchModalOpen(true);
@@ -340,16 +403,6 @@ export default function ItemFormPage() {
     }
   }
 
-  async function onCount(batch: Batch, delta: number) {
-    if (!productId) return;
-    try {
-      await adjustBatchCount(batch.batch_id, delta);
-      await reload(productId);
-    } catch (err) {
-      message.error(err instanceof Error ? err.message : "Count update failed");
-    }
-  }
-
   async function onSaveNote(batch: Batch, next: string) {
     if (!productId) return;
     const notes = next.trim();
@@ -361,10 +414,6 @@ export default function ItemFormPage() {
       message.error(err instanceof Error ? err.message : "Note update failed");
     }
   }
-
-  const noteOptions = [
-    ...new Set([...(product?.batch_notes ?? []), ...BATCH_NOTE_SUGGESTIONS]),
-  ].map((value) => ({ value }));
 
   async function onDeleteBatch(batch: Batch) {
     if (!productId) return;
@@ -389,23 +438,6 @@ export default function ItemFormPage() {
       render: (value: number) => <span className="batch-id">#{value}</span>,
     },
     {
-      title: "Note",
-      dataIndex: "notes",
-      width: 190,
-      render: (value: string, row) => (
-        <Typography.Text
-          className={value ? "batch-note" : "batch-note empty"}
-          editable={{
-            tooltip: "Edit note",
-            text: value,
-            onChange: (next) => void onSaveNote(row, next),
-          }}
-        >
-          {value || "Add note"}
-        </Typography.Text>
-      ),
-    },
-    {
       title: "Company",
       dataIndex: "company",
       render: (value: string) => (value ? <strong>{value}</strong> : "—"),
@@ -423,17 +455,24 @@ export default function ItemFormPage() {
     {
       title: "Count",
       dataIndex: "package_count",
-      width: 130,
-      render: (count: number, row) => (
-        <span className="batch-stepper">
-          <Button size="small" shape="circle" onClick={() => void onCount(row, -1)} aria-label="Use one">
-            −
-          </Button>
-          <span>{count}</span>
-          <Button size="small" shape="circle" onClick={() => void onCount(row, 1)} aria-label="Add one">
-            +
-          </Button>
-        </span>
+      width: 90,
+      render: (count: number) => <strong>{count}</strong>,
+    },
+    {
+      title: "Note",
+      dataIndex: "notes",
+      width: 190,
+      render: (value: string, row) => (
+        <Typography.Text
+          className={value ? "batch-note" : "batch-note empty"}
+          editable={{
+            tooltip: "Edit note",
+            text: value,
+            onChange: (next) => void onSaveNote(row, next),
+          }}
+        >
+          {value || "Add note"}
+        </Typography.Text>
       ),
     },
     {
@@ -456,10 +495,18 @@ export default function ItemFormPage() {
     {
       title: "",
       key: "actions",
-      width: 96,
+      width: 132,
       align: "right",
       render: (_: unknown, row) => (
         <Space size={2}>
+          <Tooltip title="Copy as new purchase">
+            <Button
+              type="text"
+              icon={<CopyOutlined />}
+              aria-label="Copy as new purchase"
+              onClick={() => openCopyBatch(row)}
+            />
+          </Tooltip>
           <Tooltip title="Edit purchase">
             <Button type="text" icon={<EditOutlined />} onClick={() => openEditBatch(row)} />
           </Tooltip>
@@ -483,6 +530,14 @@ export default function ItemFormPage() {
             Back
           </Button>
           <Button onClick={() => navigate("/")}>Cancel</Button>
+          <Button
+            onClick={() => {
+              addAnother.current = true;
+              newForm.submit();
+            }}
+          >
+            Save & add another
+          </Button>
           <Button type="primary" onClick={() => newForm.submit()}>
             Save product
           </Button>
@@ -531,8 +586,8 @@ export default function ItemFormPage() {
                     <p className="ant-upload-drag-icon">
                       <CameraOutlined />
                     </p>
-                    <p className="ant-upload-text">Drop a product photo</p>
-                    <p className="ant-upload-hint">JPEG, PNG, or WebP</p>
+                    <p className="ant-upload-text">Choose or drop a product photo</p>
+                    <p className="ant-upload-hint">It is read as soon as you pick it</p>
                   </>
                 )}
               </Upload.Dragger>
@@ -545,17 +600,38 @@ export default function ItemFormPage() {
                   disabled={extracting}
                 />
                 <div className="extract-actions">
-                  <Button
-                    type="primary"
-                    size="large"
-                    icon={<ThunderboltOutlined />}
-                    loading={extracting}
-                    disabled={!photoFile}
-                    onClick={() => void onExtractPhoto()}
-                    block
+                  <Upload
+                    accept="image/jpeg,image/png,image/webp"
+                    capture="environment"
+                    multiple={false}
+                    showUploadList={false}
+                    disabled={extracting}
+                    beforeUpload={(file) => {
+                      pickPhoto(file);
+                      return false;
+                    }}
                   >
-                    Read with Gemini
-                  </Button>
+                    <Button
+                      type="primary"
+                      size="large"
+                      icon={<CameraOutlined />}
+                      loading={extracting}
+                      block
+                    >
+                      {extracting ? "Reading…" : "Take photo"}
+                    </Button>
+                  </Upload>
+                  {photoFile ? (
+                    <Button
+                      size="large"
+                      icon={<ThunderboltOutlined />}
+                      disabled={extracting}
+                      onClick={() => void onExtractPhoto()}
+                      block
+                    >
+                      Read again
+                    </Button>
+                  ) : null}
                   {photoFile ? (
                     <Button size="large" disabled={extracting} onClick={clearPhoto} block>
                       Clear photo
@@ -671,24 +747,16 @@ export default function ItemFormPage() {
                   <Form.Item name="size_unit" label="Unit" className="form-field-narrow">
                     <Input size="large" placeholder="g" />
                   </Form.Item>
-                  <Form.Item name="expiry" label="Expiry" className="form-field-wide">
-                    <DatePicker size="large" style={{ width: "100%" }} />
-                  </Form.Item>
                   <Form.Item
                     name="batch_notes"
                     label="Batch note"
                     className="form-field-wide"
                     tooltip="What makes this batch different, e.g. sliced, baked, chopped."
                   >
-                    <AutoComplete
-                      size="large"
-                      options={noteOptions}
-                      placeholder="e.g. Sliced"
-                      allowClear
-                      filterOption={(input, option) =>
-                        String(option?.value ?? "").toLowerCase().includes(input.toLowerCase())
-                      }
-                    />
+                    <Input size="large" placeholder="Optional, e.g. Sliced" allowClear />
+                  </Form.Item>
+                  <Form.Item name="expiry" label="Expiry" className="form-field-wide">
+                    <DatePicker size="large" style={{ width: "100%" }} />
                   </Form.Item>
                 </div>
               </div>
@@ -788,6 +856,31 @@ export default function ItemFormPage() {
         />
       </Card>
 
+      <Card title="History" className="surface-card" style={{ marginBottom: 18 }}>
+        {events.length ? (
+          <ul className="history-list">
+            {events.map((event) => (
+              <li key={event.event_id}>
+                <span className={`history-delta ${event.delta < 0 ? "down" : "up"}`}>
+                  {event.delta > 0 ? `+${event.delta}` : event.delta}
+                </span>
+                <span className="history-what">
+                  {EVENT_LABELS[event.kind] ?? event.kind}
+                  {event.batch_id ? <span className="batch-id"> · #{event.batch_id}</span> : null}
+                </span>
+                <span className="history-when">
+                  {dayjs(event.created_at).format("D MMM YYYY, HH:mm")}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="import-help">
+            Nothing recorded yet. Purchases and every change in count show up here.
+          </p>
+        )}
+      </Card>
+
       <Card title="Edit details" loading={loading} className="surface-card">
         <Form
           form={productForm}
@@ -861,21 +954,6 @@ export default function ItemFormPage() {
           layout="vertical"
           onFinish={(values) => void onSaveBatch(values)}
         >
-          <Form.Item
-            name="notes"
-            label="Note for this batch"
-            tooltip="What makes this batch different, e.g. sliced, baked, chopped."
-          >
-            <AutoComplete
-              autoFocus={!editingBatch}
-              options={noteOptions}
-              placeholder="e.g. Sliced"
-              allowClear
-              filterOption={(input, option) =>
-                String(option?.value ?? "").toLowerCase().includes(input.toLowerCase())
-              }
-            />
-          </Form.Item>
           <Form.Item name="company" label="Company / brand">
             <Input />
           </Form.Item>
@@ -909,6 +987,13 @@ export default function ItemFormPage() {
               <Input />
             </Form.Item>
           </Space>
+          <Form.Item
+            name="notes"
+            label="Note for this batch"
+            tooltip="What makes this batch different, e.g. sliced, baked, chopped."
+          >
+            <Input placeholder="Optional, e.g. Sliced" allowClear />
+          </Form.Item>
           <Form.Item name="expiry" label="Expiry">
             <DatePicker />
           </Form.Item>
