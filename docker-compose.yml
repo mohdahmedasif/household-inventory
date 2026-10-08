@@ -18,6 +18,7 @@ services:
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
       INVENTORY_GEMINI_API_KEY: ${INVENTORY_GEMINI_API_KEY:-}
       GEMINI_MODEL: ${GEMINI_MODEL:-gemini-flash-latest}
+      GEMINI_FALLBACK_MODEL: ${GEMINI_FALLBACK_MODEL:-gemini-flash-lite-latest}
     volumes:
       - inventory-data:/data
     restart: unless-stopped

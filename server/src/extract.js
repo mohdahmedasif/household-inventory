@@ -128,6 +128,39 @@ function geminiModel() {
   return process.env.GEMINI_MODEL?.trim() || "gemini-flash-latest";
 }
 
+function geminiFallbackModel() {
+  return process.env.GEMINI_FALLBACK_MODEL?.trim() || "gemini-flash-lite-latest";
+}
+
+const RETRY_DELAYS_MS = [800, 2000];
+
+function isOverloaded(err) {
+  const status = Number(err?.status);
+  if (status === 429 || status === 500 || status === 503) return true;
+  return /UNAVAILABLE|RESOURCE_EXHAUSTED|high demand|overloaded/i.test(String(err?.message || ""));
+}
+
+// Gemini sheds load with 503/429 during demand spikes: retry the primary
+// model briefly, then try the fallback model once before giving up.
+async function generateWithRetry(ai, request) {
+  const primary = geminiModel();
+  const fallback = geminiFallbackModel();
+  let lastError;
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      return await ai.models.generateContent({ ...request, model: primary });
+    } catch (err) {
+      if (!isOverloaded(err)) throw err;
+      lastError = err;
+      const delay = RETRY_DELAYS_MS[attempt];
+      if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+  }
+  if (!fallback || fallback === primary) throw lastError;
+  console.warn(`Gemini ${primary} unavailable; falling back to ${fallback}.`);
+  return ai.models.generateContent({ ...request, model: fallback });
+}
+
 export async function extractItem({
   imageBuffer,
   mimeType = "image/jpeg",
@@ -164,31 +197,31 @@ export async function extractItem({
   else promptBits.push("No caption was provided; infer details from the image/label.");
 
   const ai = new GoogleGenAI({ apiKey });
+  const request = {
+    contents: [
+      {
+        role: "user",
+        parts: [
+          {
+            inlineData: {
+              mimeType: mimeType || "image/jpeg",
+              data: Buffer.from(imageBuffer).toString("base64"),
+            },
+          },
+          { text: promptBits.join("\n") },
+        ],
+      },
+    ],
+    config: {
+      systemInstruction: buildInstruction(categories, locations, packageTypes),
+      responseMimeType: "application/json",
+      responseJsonSchema: buildSchema(categories, locations, packageTypes),
+      temperature: 0.2,
+    },
+  };
   let response;
   try {
-    response = await ai.models.generateContent({
-      model: geminiModel(),
-      contents: [
-        {
-          role: "user",
-          parts: [
-            {
-              inlineData: {
-                mimeType: mimeType || "image/jpeg",
-                data: Buffer.from(imageBuffer).toString("base64"),
-              },
-            },
-            { text: promptBits.join("\n") },
-          ],
-        },
-      ],
-      config: {
-        systemInstruction: buildInstruction(categories, locations, packageTypes),
-        responseMimeType: "application/json",
-        responseJsonSchema: buildSchema(categories, locations, packageTypes),
-        temperature: 0.2,
-      },
-    });
+    response = await generateWithRetry(ai, request);
   } catch (cause) {
     const err = new Error(cause?.message || "Gemini request failed.");
     err.status = 502;
