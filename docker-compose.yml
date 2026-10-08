@@ -4,7 +4,7 @@ services:
   inventory:
     build: .
     image: household-inventory:latest
-    container_name: household-inventory
+    container_name: household-inventory-app
     ports:
       - "${INVENTORY_HOST_PORT:-3000}:3000"
     env_file:
