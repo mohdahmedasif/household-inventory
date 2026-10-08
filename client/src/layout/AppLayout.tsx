@@ -18,8 +18,8 @@ const { Sider, Content } = Layout;
 type NavItem = { path: string; icon: ReactNode; label: string };
 
 const PRIMARY_NAV: NavItem[] = [
-  { path: "/", icon: <AppstoreOutlined />, label: "Pantry" },
   { path: "/stats", icon: <BarChartOutlined />, label: "Overview" },
+  { path: "/", icon: <AppstoreOutlined />, label: "Pantry" },
   { path: "/reports", icon: <TableOutlined />, label: "Reports" },
 ];
 
