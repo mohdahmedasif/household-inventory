@@ -1,4 +1,4 @@
-import { BLANK_PLACEHOLDERS, WRITABLE_FIELDS } from "./catalog.js";
+import { BLANK_PLACEHOLDERS, WRITABLE_FIELDS, sentenceCase, titleCase } from "./catalog.js";
 import { getCatalog, getSettings } from "./db.js";
 
 const SHEETS_EPOCH = Date.UTC(1899, 11, 30);
@@ -58,11 +58,11 @@ export function normalizeProduct(db, raw = {}, { partial = false } = {}) {
     out[field] = transform(source[field]);
   };
 
-  take("name", (v) => blankIfPlaceholder(v));
+  take("name", (v) => titleCase(blankIfPlaceholder(v)));
   take("category", (v) =>
     coerceChoice(v, catalog.categories, settings.default_category),
   );
-  take("notes", (v) => blankIfPlaceholder(v));
+  take("notes", (v) => sentenceCase(blankIfPlaceholder(v)));
 
   if (!partial && !out.name) {
     const err = new Error("Name is required.");
@@ -92,7 +92,7 @@ export function normalizeBatch(db, raw = {}, { partial = false } = {}) {
   if (!partial || source.company !== undefined || source.brand !== undefined) {
     const companyRaw =
       source.company !== undefined ? source.company : source.brand;
-    out.company = blankIfPlaceholder(companyRaw);
+    out.company = titleCase(blankIfPlaceholder(companyRaw));
   }
 
   take("location", (v) =>
@@ -106,7 +106,7 @@ export function normalizeBatch(db, raw = {}, { partial = false } = {}) {
   take("size_value", (v) => blankIfPlaceholder(v));
   take("size_unit", (v) => blankIfPlaceholder(v));
   take("expiry_date", (v) => coerceDate(v));
-  take("notes", (v) => blankIfPlaceholder(v));
+  take("notes", (v) => sentenceCase(blankIfPlaceholder(v)));
   if (!partial || source.acquired_on !== undefined || source.last_updated !== undefined) {
     const stamp = source.acquired_on !== undefined ? source.acquired_on : source.last_updated;
     out.acquired_on = coerceDate(stamp) || "";

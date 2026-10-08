@@ -14,6 +14,8 @@ import {
   listCatalogNames,
   listCompanies,
   listProducts,
+  listStockEvents,
+  logStockEvent,
   nextBatchId,
   nextProductId,
   normalizeKey,
@@ -162,6 +164,15 @@ export function createRouter(db) {
     };
     insertBatchStmt.run(row);
     setBatchIdSeq(db, id);
+    logStockEvent(db, {
+      productId,
+      batchId: id,
+      kind: "purchase",
+      delta: row.package_count,
+      countAfter: row.package_count,
+      // Imports carry their original purchase date; anything dated today gets the real time.
+      createdAt: acquired === stamp ? undefined : `${acquired}T00:00:00.000Z`,
+    });
     db.prepare("UPDATE products SET last_updated = ? WHERE product_id = ?").run(
       stamp,
       productId,
@@ -176,7 +187,7 @@ export function createRouter(db) {
       productFields.category,
     );
     if (existing) {
-      insertBatchRow(existing.product_id, batchFields);
+      addOrTopUpBatch(existing.product_id, batchFields);
       if (!existing.notes && productFields.notes) {
         db.prepare(
           "UPDATE products SET notes = ?, last_updated = ? WHERE product_id = ?",
@@ -198,6 +209,36 @@ export function createRouter(db) {
     insertBatchRow(productId, batchFields);
     return getProduct(db, productId);
   });
+
+  // A purchase identical to one already on the shelf (same company, place,
+  // package, size, expiry and note) raises that batch's count instead of
+  // adding a second row. The acquired date is not part of the comparison.
+  function findSameBatch(productId, batchFields) {
+    const text = (value) => String(value ?? "").trim();
+    const companyKey = normalizeKey(batchFields.company);
+    return listBatchesForProduct(db, productId).find(
+      (batch) =>
+        normalizeKey(batch.company) === companyKey &&
+        text(batch.location) === text(batchFields.location) &&
+        text(batch.package_type) === text(batchFields.package_type) &&
+        text(batch.units_per_package) === text(batchFields.units_per_package) &&
+        text(batch.size_value) === text(batchFields.size_value) &&
+        text(batch.size_unit) === text(batchFields.size_unit) &&
+        text(batch.expiry_date) === text(batchFields.expiry_date) &&
+        text(batch.notes) === text(batchFields.notes),
+    );
+  }
+
+  function addOrTopUpBatch(productId, batchFields) {
+    const same = findSameBatch(productId, batchFields);
+    if (!same) return insertBatchRow(productId, batchFields);
+    const added = batchFields.package_count ?? 1;
+    return updateBatchTx(
+      same.batch_id,
+      { package_count: same.package_count + added },
+      { kind: "purchase" },
+    );
+  }
 
   const updateProductTx = db.transaction((productId, patch) => {
     const current = db
@@ -231,11 +272,11 @@ export function createRouter(db) {
       .prepare("SELECT product_id FROM products WHERE product_id = ?")
       .get(productId);
     if (!product) throw notFound("Product not found.");
-    insertBatchRow(productId, batchFields);
+    addOrTopUpBatch(productId, batchFields);
     return getProduct(db, productId);
   });
 
-  const updateBatchTx = db.transaction((batchId, patch) => {
+  const updateBatchTx = db.transaction((batchId, patch, { kind } = {}) => {
     const current = getBatch(db, batchId);
     if (!current) throw notFound("Batch not found.");
     const oldCompanyId = current.company_id;
@@ -282,6 +323,16 @@ export function createRouter(db) {
     if (oldCompanyId && oldCompanyId !== (company?.company_id ?? null)) {
       pruneCompany(db, oldCompanyId);
     }
+    const delta = merged.package_count - current.package_count;
+    if (delta) {
+      logStockEvent(db, {
+        productId: current.product_id,
+        batchId,
+        kind: kind || (delta < 0 ? "used" : "added"),
+        delta,
+        countAfter: merged.package_count,
+      });
+    }
     db.prepare("UPDATE products SET last_updated = ? WHERE product_id = ?").run(
       stamp,
       current.product_id,
@@ -294,6 +345,13 @@ export function createRouter(db) {
     if (!current) throw notFound("Batch not found.");
     const productId = current.product_id;
     const companyId = current.company_id;
+    logStockEvent(db, {
+      productId,
+      batchId,
+      kind: "removed",
+      delta: -current.package_count,
+      countAfter: 0,
+    });
     deleteBatchStmt.run(batchId);
     pruneCompany(db, companyId);
     const remaining = listBatchesForProduct(db, productId);
@@ -324,6 +382,10 @@ export function createRouter(db) {
       ).run(label, label, sourceId);
     }
     db.prepare("UPDATE batches SET product_id = ? WHERE product_id = ?").run(targetId, sourceId);
+    db.prepare("UPDATE stock_events SET product_id = ? WHERE product_id = ?").run(
+      targetId,
+      sourceId,
+    );
     const notes = target.notes || source.notes || "";
     db.prepare("UPDATE products SET notes = ?, last_updated = ? WHERE product_id = ?").run(
       notes,
@@ -739,6 +801,16 @@ export function createRouter(db) {
       const product = getProduct(db, productId);
       if (!product) throw notFound("Product not found.");
       res.json(product);
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  router.get("/products/:id/events", (req, res) => {
+    try {
+      const productId = parseProductId(req.params.id);
+      if (!productId) throw badRequest("Invalid product id.");
+      res.json({ events: listStockEvents(db, productId) });
     } catch (err) {
       sendError(res, err);
     }

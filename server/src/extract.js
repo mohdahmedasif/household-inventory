@@ -1,4 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
+import { sentenceCase, titleCase } from "./catalog.js";
 
 const EXTRACTION_SYSTEM_INSTRUCTION = `Extract one household inventory item — a pantry/grocery item OR a medicine/supplement — into a JSON object with keys: name, brand, category, location, package_type, package_count, units_per_package, size_value, size_unit, expiry_date, notes.
 name MUST be a real, concrete product or medicine name in English (translate from the user's language or label text if needed). For a branded medicine use the label's product name (e.g. 'Nexpro-20 Tablets'); if only the generic/active ingredient is known, use that (e.g. 'Pantoprazol'). For groceries use the plain English product name (e.g. 'Chickpeas', 'Sella Basmati Rice'). Never use Unknown, N/A, or a placeholder.
@@ -101,8 +102,8 @@ function normalizeDraft(raw, catalog, settings) {
   const unitsMatch = units.match(/\d+/);
 
   return {
-    name: blankIfPlaceholder(raw?.name),
-    company: blankIfPlaceholder(raw?.brand || raw?.company),
+    name: titleCase(blankIfPlaceholder(raw?.name)),
+    company: titleCase(blankIfPlaceholder(raw?.brand || raw?.company)),
     category: coerceChoice(raw?.category, categories, defaults.category),
     location: coerceChoice(raw?.location, locations, defaults.location),
     package_type: coerceChoice(raw?.package_type, packageTypes, defaults.package_type),
@@ -111,7 +112,7 @@ function normalizeDraft(raw, catalog, settings) {
     size_value: blankIfPlaceholder(raw?.size_value),
     size_unit: blankIfPlaceholder(raw?.size_unit),
     expiry_date: coerceExpiry(raw?.expiry_date),
-    notes: blankIfPlaceholder(raw?.notes),
+    notes: sentenceCase(blankIfPlaceholder(raw?.notes)),
     batch_notes: "",
   };
 }

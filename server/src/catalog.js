@@ -89,3 +89,22 @@ export function parseKind(raw) {
   if (kind in CATALOG_KINDS) return kind;
   return null;
 }
+
+/** Capitalize only the first letter, for free-text notes ("walnut" → "Walnut"). */
+export function sentenceCase(value) {
+  const text = String(value ?? "");
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+const LOWERCASE_UNITS = new Set(["g", "kg", "mg", "ml", "cl", "l", "oz", "lb", "x"]);
+
+/**
+ * Capitalize the first letter of each all-lowercase word ("cooking Oil" →
+ * "Cooking Oil"). Words with their own casing (iPhone, DS) and units stay as is.
+ */
+export function titleCase(value) {
+  return String(value ?? "").replace(/[\p{L}\p{N}'’]+/gu, (word) => {
+    if (LOWERCASE_UNITS.has(word) || word !== word.toLowerCase()) return word;
+    return word.charAt(0).toUpperCase() + word.slice(1);
+  });
+}

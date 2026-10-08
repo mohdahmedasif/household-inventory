@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
-import { DEFAULT_SEEDS, DEFAULT_SETTINGS } from "./catalog.js";
+import { DEFAULT_SEEDS, DEFAULT_SETTINGS, sentenceCase, titleCase } from "./catalog.js";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS products (
@@ -47,6 +47,19 @@ CREATE TABLE IF NOT EXISTS catalog_options (
   PRIMARY KEY (kind, name)
 );
 
+-- One row per change in a batch's package count (purchase, use, correction).
+-- batch_id is not a foreign key so history survives a deleted batch.
+CREATE TABLE IF NOT EXISTS stock_events (
+  event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id INTEGER NOT NULL REFERENCES products(product_id) ON DELETE CASCADE,
+  batch_id INTEGER,
+  kind TEXT NOT NULL,
+  delta INTEGER NOT NULL,
+  count_after INTEGER NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_stock_events_product_id ON stock_events(product_id);
 CREATE INDEX IF NOT EXISTS idx_products_name_key_category
   ON products(name_key, category);
 CREATE INDEX IF NOT EXISTS idx_batches_product_id ON batches(product_id);
@@ -61,6 +74,7 @@ export function createDb(filePath) {
   db.pragma("foreign_keys = ON");
   db.exec(SCHEMA);
   migrateFromItems(db);
+  capitalizeNames(db);
   ensureSeq(db, "product_id_seq", "products", "product_id");
   ensureSeq(db, "company_id_seq", "companies", "company_id");
   ensureSeq(db, "batch_id_seq", "batches", "batch_id");
@@ -69,6 +83,27 @@ export function createDb(filePath) {
   seedCatalog(db);
   seedSettings(db);
   return db;
+}
+
+// Rows saved before names and notes were capitalized on write (name_key is unaffected).
+function capitalizeNames(db) {
+  const targets = [
+    ["products", "product_id", "name", titleCase],
+    ["companies", "company_id", "name", titleCase],
+    ["products", "product_id", "notes", sentenceCase],
+    ["batches", "batch_id", "notes", sentenceCase],
+  ];
+  const fix = db.transaction(() => {
+    for (const [table, idColumn, column, convert] of targets) {
+      const update = db.prepare(`UPDATE ${table} SET ${column} = ? WHERE ${idColumn} = ?`);
+      const rows = db.prepare(`SELECT ${idColumn} AS id, ${column} AS value FROM ${table}`).all();
+      for (const row of rows) {
+        const value = convert(row.value);
+        if (value !== row.value) update.run(value, row.id);
+      }
+    }
+  });
+  fix();
 }
 
 function ensureSeq(db, key, table, column) {
@@ -317,6 +352,24 @@ export function setCompanyIdSeq(db, companyId) {
 export function setBatchIdSeq(db, batchId) {
   setMeta(db, "batch_id_seq", batchId);
   setMeta(db, "id_seq", batchId);
+}
+
+export function logStockEvent(db, { productId, batchId, kind, delta, countAfter, createdAt }) {
+  if (!delta) return;
+  db.prepare(
+    `INSERT INTO stock_events (product_id, batch_id, kind, delta, count_after, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(productId, batchId, kind, delta, countAfter, createdAt || new Date().toISOString());
+}
+
+export function listStockEvents(db, productId, limit = 100) {
+  return db
+    .prepare(
+      `SELECT event_id, batch_id, kind, delta, count_after, created_at
+       FROM stock_events WHERE product_id = ?
+       ORDER BY created_at DESC, event_id DESC LIMIT ?`,
+    )
+    .all(productId, limit);
 }
 
 export function findOrCreateCompany(db, brandName) {
