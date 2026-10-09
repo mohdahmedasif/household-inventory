@@ -109,12 +109,9 @@ npm run import:sheet
 
 Rows with the same name + category collapse into one product; each row becomes a purchase batch.
 
-## Auto-deploy (GitHub Actions → VPS over SSH)
+## Deploying on a VPS
 
-On every push to `main`, GitHub SSHs into your VPS and runs [`scripts/deploy.sh`](scripts/deploy.sh)
-(git pull → install deps → build the SPA → restart).
-
-### 1. One-time: app on the VPS
+### One-time setup
 
 ```bash
 git clone https://github.com/mohdahmedasif/household-inventory.git
@@ -135,28 +132,10 @@ Or with Docker:
 docker compose up -d --build
 ```
 
-Make sure your deploy public key is in `~/.ssh/authorized_keys` on the VPS.
+### Updating
 
-### 2. GitHub secrets
-
-| Secret | Meaning |
-|--------|---------|
-| `DEPLOY_HOST` | VPS IP / hostname |
-| `DEPLOY_USER` | SSH user |
-| `DEPLOY_PATH` | Full path to the repo on the VPS |
-| `DEPLOY_SSH_KEY` | Private key (**set from file**, see below) |
-| `DEPLOY_PORT` | Optional (default 22) |
-
-```powershell
-# Windows — set key from file (no paste)
-Get-Content -Raw $env:USERPROFILE\.ssh\github-actions | gh secret set DEPLOY_SSH_KEY --repo mohdahmedasif/household-inventory
-```
-
-### 3. Deploy
-
-Push to `main`, or **Actions → Deploy → Run workflow**.
-
-Manual on the server:
+On the server, [`scripts/deploy.sh`](scripts/deploy.sh) pulls `main`, installs dependencies,
+rebuilds the SPA and restarts the app:
 
 ```bash
 bash scripts/deploy.sh

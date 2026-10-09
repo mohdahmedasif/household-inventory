@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Pull latest main, install deps, rebuild the SPA, restart the inventory API.
-# Used by GitHub Actions (SSH) and safe to run manually on the VPS:
+# Run on the VPS to update the app:
 #   bash scripts/deploy.sh
 set -euo pipefail
 
