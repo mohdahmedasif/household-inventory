@@ -333,6 +333,26 @@ export function importItems(items: SheetRow[]) {
   });
 }
 
+export type Backup = {
+  format: string;
+  version: number;
+  exported_at: string;
+  tables: Record<string, unknown[]>;
+};
+
+export function fetchBackup() {
+  return request<Backup>("/api/backup");
+}
+
+export function restoreBackup(file: File) {
+  const body = new FormData();
+  body.append("file", file);
+  return request<{ restored: Record<string, number>; exported_at: string }>("/api/restore", {
+    method: "POST",
+    body,
+  });
+}
+
 export function fetchStats() {
   return request<Stats>("/api/stats");
 }

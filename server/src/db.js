@@ -109,6 +109,81 @@ function capitalizeNames(db) {
   fix();
 }
 
+// ---------- Full backup ----------
+
+export const BACKUP_FORMAT = "household-inventory-backup";
+export const BACKUP_VERSION = 1;
+
+// Parents before children, so a restore can insert in this order.
+const BACKUP_TABLES = ["companies", "products", "batches", "stock_events", "catalog_options", "meta"];
+
+/** Every row of every table, as one JSON-serializable object. */
+export function exportBackup(db) {
+  const tables = {};
+  const read = db.transaction(() => {
+    for (const table of BACKUP_TABLES) {
+      tables[table] = db.prepare(`SELECT * FROM ${table}`).all();
+    }
+  });
+  read();
+  return {
+    format: BACKUP_FORMAT,
+    version: BACKUP_VERSION,
+    exported_at: new Date().toISOString(),
+    tables,
+  };
+}
+
+function invalidBackup(message) {
+  const err = new Error(message);
+  err.status = 400;
+  return err;
+}
+
+/**
+ * Replace everything in the database with the contents of a backup, keeping
+ * ids exactly as they were. All or nothing: a bad file leaves the data untouched.
+ */
+export function restoreBackup(db, backup) {
+  if (!backup || backup.format !== BACKUP_FORMAT) {
+    throw invalidBackup("That file is not an inventory backup.");
+  }
+  if (!Number.isInteger(backup.version) || backup.version > BACKUP_VERSION) {
+    throw invalidBackup("That backup was made by a newer version of the app.");
+  }
+  const tables = backup.tables;
+  if (!tables || BACKUP_TABLES.some((table) => !Array.isArray(tables[table]))) {
+    throw invalidBackup("That backup is incomplete.");
+  }
+
+  const counts = {};
+  const restore = db.transaction(() => {
+    for (const table of [...BACKUP_TABLES].reverse()) db.prepare(`DELETE FROM ${table}`).run();
+    for (const table of BACKUP_TABLES) {
+      const known = db.prepare(`PRAGMA table_info(${table})`).all().map((column) => column.name);
+      const statements = new Map();
+      for (const row of tables[table]) {
+        const columns = known.filter((column) => row[column] !== undefined);
+        const signature = columns.join(",");
+        if (!statements.has(signature)) {
+          statements.set(
+            signature,
+            db.prepare(
+              `INSERT INTO ${table} (${signature}) VALUES (${columns.map(() => "?").join(", ")})`,
+            ),
+          );
+        }
+        statements.get(signature).run(...columns.map((column) => row[column]));
+      }
+      counts[table] = tables[table].length;
+    }
+    // Settings added since the backup was made get their starting values.
+    seedSettings(db);
+  });
+  restore();
+  return counts;
+}
+
 function ensureSeq(db, key, table, column) {
   const seq = db.prepare("SELECT value FROM meta WHERE key = ?").get(key);
   if (!seq) {

@@ -43,6 +43,9 @@ export const config = {
   get similarLimit() {
     return number("INVENTORY_SIMILAR_LIMIT", 3);
   },
+  get maxBackupBytes() {
+    return number("INVENTORY_MAX_BACKUP_MB", 50) * 1024 * 1024;
+  },
   get historyLimit() {
     return number("INVENTORY_HISTORY_LIMIT", 100);
   },

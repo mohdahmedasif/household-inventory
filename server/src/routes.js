@@ -1,8 +1,11 @@
 import { Router } from "express";
+import fs from "node:fs";
+import path from "node:path";
 import multer from "multer";
 import { SETTINGS_SCHEMA, coerceSetting, parseKind } from "./catalog.js";
 import { config } from "./config.js";
 import {
+  exportBackup,
   findOrCreateCompany,
   findProductByNameCategory,
   findSimilarProducts,
@@ -21,6 +24,7 @@ import {
   nextProductId,
   normalizeKey,
   pruneCompany,
+  restoreBackup,
   saveSetting,
   setBatchIdSeq,
   setMeta,
@@ -101,6 +105,10 @@ function countBy(items, field) {
 export function createRouter(db) {
   const router = Router();
   const upload = createUpload();
+  const backupUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: config.maxBackupBytes, files: 1 },
+  });
 
   const insertProductStmt = db.prepare(`
     INSERT INTO products (product_id, name, name_key, category, notes, last_updated)
@@ -1045,6 +1053,45 @@ export function createRouter(db) {
     } catch (err) {
       sendError(res, err);
     }
+  });
+
+  // --- Full backup & restore ---
+
+  router.get("/backup", (_req, res) => {
+    try {
+      const backup = exportBackup(db);
+      const stamp = backup.exported_at.slice(0, 10);
+      res.setHeader("Content-Disposition", `attachment; filename="inventory-backup-${stamp}.json"`);
+      res.json(backup);
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  router.post("/restore", (req, res) => {
+    backupUpload.single("file")(req, res, (uploadErr) => {
+      if (uploadErr) {
+        sendError(res, uploadErr);
+        return;
+      }
+      try {
+        if (!req.file) throw badRequest("Choose a backup file.");
+        let backup;
+        try {
+          backup = JSON.parse(req.file.buffer.toString("utf8"));
+        } catch {
+          throw badRequest("That file is not an inventory backup.");
+        }
+        // Keep what is about to be replaced, next to the database, in case the
+        // wrong file was chosen.
+        const safetyCopy = path.join(path.dirname(db.name), "before-last-restore.json");
+        fs.writeFileSync(safetyCopy, JSON.stringify(exportBackup(db)));
+        const restored = restoreBackup(db, backup);
+        res.json({ restored, exported_at: backup.exported_at ?? "" });
+      } catch (err) {
+        sendError(res, err);
+      }
+    });
   });
 
   router.post("/import", (req, res) => {
