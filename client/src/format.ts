@@ -1,11 +1,13 @@
-import type { Batch, ProductCreateInput, Settings } from "./api";
+import type { Batch, ProductCreateInput } from "./api";
+import { settings } from "./settings";
+import { chartColor } from "./theme";
 
 export function expiryTone(expiry: string): "none" | "ok" | "soon" | "expired" {
   if (!expiry) return "none";
   const days = daysUntil(expiry);
   if (days == null) return "none";
   if (days < 0) return "expired";
-  if (days <= 30) return "soon";
+  if (days <= settings().expiring_soon_days) return "soon";
   return "ok";
 }
 
@@ -24,37 +26,25 @@ export function expiryLabel(expiry: string): string {
   if (days == null) return expiry;
   if (days < 0) return `Expired ${Math.abs(days)}d ago`;
   if (days === 0) return "Expires today";
-  if (days <= 60) return `${days}d left`;
+  if (days <= settings().expiry_countdown_days) return `${days}d left`;
   return expiry;
 }
-
-export const CHART_COLORS = [
-  "#3d6b4f",
-  "#6f947c",
-  "#c4a574",
-  "#5b7c8d",
-  "#8fad99",
-  "#b45309",
-  "#78716c",
-  "#4a7d5d",
-  "#a78b6d",
-  "#2f543d",
-];
 
 export function categoryColor(name: string): string {
   let hash = 0;
   for (const ch of name.toLowerCase()) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
-  return CHART_COLORS[hash % CHART_COLORS.length];
+  return chartColor(hash);
 }
 
-export function emptyProductInput(settings?: Partial<Settings> | null): ProductCreateInput {
+export function emptyProductInput(): ProductCreateInput {
+  const defaults = settings();
   return {
     name: "",
-    category: settings?.default_category || "Canned Goods",
+    category: defaults.default_category,
     notes: "",
     company: "",
-    location: settings?.default_location || "Kitchen Cabinet",
-    package_type: settings?.default_package_type || "Pack",
+    location: defaults.default_location,
+    package_type: defaults.default_package_type,
     package_count: 1,
     units_per_package: "",
     size_value: "",
@@ -64,11 +54,12 @@ export function emptyProductInput(settings?: Partial<Settings> | null): ProductC
   };
 }
 
-export function emptyBatchInput(settings?: Partial<Settings> | null) {
+export function emptyBatchInput() {
+  const defaults = settings();
   return {
     company: "",
-    location: settings?.default_location || "Kitchen Cabinet",
-    package_type: settings?.default_package_type || "Pack",
+    location: defaults.default_location,
+    package_type: defaults.default_package_type,
     package_count: 1,
     units_per_package: "",
     size_value: "",

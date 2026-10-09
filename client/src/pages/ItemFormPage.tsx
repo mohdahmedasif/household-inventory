@@ -226,12 +226,7 @@ export default function ItemFormPage() {
         if (editing && productId) {
           await reload(productId);
         } else {
-          newForm.setFieldsValue({
-            ...emptyProductInput(),
-            category: cat.defaults?.category ?? "Canned Goods",
-            location: cat.defaults?.location ?? "Kitchen Cabinet",
-            package_type: cat.defaults?.package_type ?? "Pack",
-          });
+          newForm.setFieldsValue(emptyProductInput());
         }
       } catch (err) {
         message.error(err instanceof Error ? err.message : "Failed to load product");
@@ -271,12 +266,7 @@ export default function ItemFormPage() {
     setPhotoCaption("");
     setSimilar([]);
     newForm.resetFields();
-    newForm.setFieldsValue({
-      ...emptyProductInput(),
-      category: catalog?.defaults?.category ?? "Canned Goods",
-      location: catalog?.defaults?.location ?? "Kitchen Cabinet",
-      package_type: catalog?.defaults?.package_type ?? "Pack",
-    });
+    newForm.setFieldsValue(emptyProductInput());
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -323,8 +313,8 @@ export default function ItemFormPage() {
     batchForm.setFieldsValue({
       ...emptyBatchInput(),
       company: last?.company ?? "",
-      location: last?.location || (catalog?.defaults?.location ?? "Kitchen Cabinet"),
-      package_type: last?.package_type || (catalog?.defaults?.package_type ?? "Pack"),
+      location: last?.location || emptyBatchInput().location,
+      package_type: last?.package_type || emptyBatchInput().package_type,
       units_per_package: last?.units_per_package ?? "",
       size_value: last?.size_value ?? "",
       size_unit: last?.size_unit ?? "",
@@ -925,7 +915,7 @@ export default function ItemFormPage() {
       >
         <Typography.Paragraph type="secondary">
           All {product?.purchase_count ?? 0} purchase(s) move to the product you pick, and this
-          product is removed. Each moved purchase is noted with its original name.
+          product is removed.
         </Typography.Paragraph>
         <Select
           showSearch

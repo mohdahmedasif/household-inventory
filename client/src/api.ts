@@ -103,6 +103,15 @@ export type Settings = {
   default_category: string;
   default_location: string;
   default_package_type: string;
+  expiring_soon_days: number;
+  expiry_countdown_days: number;
+  top_companies_count: number;
+  card_notes_count: number;
+  lowercase_units: string[];
+  blank_words: string[];
+  extract_language: string;
+  app_name: string;
+  app_tagline: string;
 };
 
 export type Stats = {
@@ -175,7 +184,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export function fetchAuthStatus() {
-  return request<{ required: boolean }>("/api/auth");
+  return request<{ required: boolean; app_name: string; app_tagline: string }>("/api/auth");
 }
 
 export function fetchCatalog() {

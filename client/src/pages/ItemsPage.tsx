@@ -9,6 +9,7 @@ import {
   type ProductSummary,
 } from "../api";
 import { categoryColor, daysUntil, expiryLabel, expiryTone } from "../format";
+import { settings } from "../settings";
 
 type SortKey = "name" | "expiry" | "stock";
 
@@ -67,6 +68,7 @@ export default function ItemsPage() {
   );
 
   const filtersActive = Boolean(q || location || company || category);
+  const notesShown = settings().card_notes_count;
 
   return (
     <>
@@ -214,15 +216,15 @@ export default function ItemsPage() {
                     <div className="item-card-brand">{product.companies.join(" · ")}</div>
                   ) : null}
                 </div>
-                {product.batch_notes?.length ? (
+                {product.batch_notes?.length && notesShown > 0 ? (
                   <div className="note-chips">
-                    {product.batch_notes.slice(0, 3).map((note) => (
+                    {product.batch_notes.slice(0, notesShown).map((note) => (
                       <span key={note} className="note-chip" title={note}>
                         {note}
                       </span>
                     ))}
-                    {product.batch_notes.length > 3 ? (
-                      <span className="note-chip more">+{product.batch_notes.length - 3}</span>
+                    {product.batch_notes.length > notesShown ? (
+                      <span className="note-chip more">+{product.batch_notes.length - notesShown}</span>
                     ) : null}
                   </div>
                 ) : null}

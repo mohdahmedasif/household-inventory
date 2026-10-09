@@ -2,17 +2,22 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App as AntdApp, ConfigProvider } from "antd";
 import { BrowserRouter } from "react-router-dom";
-import App from "./App";
 import "antd/dist/reset.css";
 import "./index.css";
+import App from "./App";
+import { tint, token } from "./theme";
 
-const INK = "#1c1917";
-const MUTED = "#78716c";
-const PRIMARY = "#3d6b4f";
-const PRIMARY_DEEP = "#2f543d";
-const SURFACE = "#ffffff";
-const SUNKEN = "#f0ece5";
-const BORDER = "#e7e2d8";
+const INK = token("ink");
+const MUTED = token("muted");
+const PRIMARY = token("primary");
+const PRIMARY_DEEP = token("primary-deep");
+const PRIMARY_SOFT = token("primary-soft");
+const SURFACE = token("surface");
+const SUNKEN = token("sunken");
+const BORDER = token("border");
+const BORDER_STRONG = token("border-strong");
+const BG_DEEP = token("bg-deep");
+const FOCUS_RING = `0 0 0 3px ${tint("primary", 14)}`;
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
@@ -20,21 +25,21 @@ createRoot(document.getElementById("root")!).render(
       theme={{
         token: {
           colorPrimary: PRIMARY,
-          colorPrimaryHover: "#4a7d5d",
+          colorPrimaryHover: token("primary-hover"),
           colorPrimaryActive: PRIMARY_DEEP,
           colorInfo: PRIMARY,
           colorSuccess: PRIMARY,
-          colorWarning: "#b45309",
-          colorError: "#b42318",
+          colorWarning: token("warn"),
+          colorError: token("danger"),
           colorLink: PRIMARY_DEEP,
           colorText: INK,
           colorTextSecondary: MUTED,
-          colorTextTertiary: "#a8a29e",
-          colorBgLayout: "#f6f4ef",
+          colorTextTertiary: token("faint"),
+          colorBgLayout: token("bg"),
           colorBgContainer: SURFACE,
           colorBgElevated: SURFACE,
           colorBorder: BORDER,
-          colorBorderSecondary: "#ebe7df",
+          colorBorderSecondary: BG_DEEP,
           colorFillAlter: SUNKEN,
           borderRadius: 12,
           borderRadiusLG: 16,
@@ -42,10 +47,9 @@ createRoot(document.getElementById("root")!).render(
           controlHeight: 40,
           controlHeightLG: 44,
           fontSize: 15,
-          fontFamily:
-            'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
-          boxShadow: "0 1px 2px rgba(28, 25, 23, 0.04), 0 8px 24px rgba(28, 25, 23, 0.04)",
-          boxShadowSecondary: "0 12px 28px rgba(28, 25, 23, 0.08)",
+          fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--font-body").trim(),
+          boxShadow: "var(--pantry-shadow-sm)",
+          boxShadowSecondary: "var(--pantry-shadow-md)",
         },
         components: {
           Button: {
@@ -61,22 +65,22 @@ createRoot(document.getElementById("root")!).render(
           Input: {
             borderRadius: 12,
             colorBgContainer: SURFACE,
-            hoverBorderColor: "#d9d2c5",
+            hoverBorderColor: BORDER_STRONG,
             activeBorderColor: PRIMARY,
-            activeShadow: "0 0 0 3px rgba(61, 107, 79, 0.14)",
+            activeShadow: FOCUS_RING,
           },
           InputNumber: {
             borderRadius: 12,
             colorBgContainer: SURFACE,
-            hoverBorderColor: "#d9d2c5",
+            hoverBorderColor: BORDER_STRONG,
             activeBorderColor: PRIMARY,
-            activeShadow: "0 0 0 3px rgba(61, 107, 79, 0.14)",
+            activeShadow: FOCUS_RING,
           },
           Select: {
             borderRadius: 12,
             colorBgContainer: SURFACE,
-            optionSelectedBg: "#e8f0ea",
-            optionActiveBg: "rgba(61, 107, 79, 0.08)",
+            optionSelectedBg: PRIMARY_SOFT,
+            optionActiveBg: tint("primary", 8),
           },
           DatePicker: {
             borderRadius: 12,
@@ -92,9 +96,9 @@ createRoot(document.getElementById("root")!).render(
           Table: {
             headerBg: SUNKEN,
             headerColor: MUTED,
-            headerSortActiveBg: "#ebe7df",
-            headerSortHoverBg: "#ebe7df",
-            rowHoverBg: "rgba(61, 107, 79, 0.05)",
+            headerSortActiveBg: BG_DEEP,
+            headerSortHoverBg: BG_DEEP,
+            rowHoverBg: tint("primary", 5),
             borderColor: BORDER,
             headerSplitColor: "transparent",
             headerBorderRadius: 0,
@@ -127,7 +131,7 @@ createRoot(document.getElementById("root")!).render(
           },
           Pagination: {
             borderRadius: 10,
-            itemActiveBg: "#e8f0ea",
+            itemActiveBg: PRIMARY_SOFT,
           },
         },
       }}

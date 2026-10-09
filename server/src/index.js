@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
-import { createDb } from "./db.js";
+import { createDb, getSettings } from "./db.js";
 import { loadDotEnv } from "./env.js";
 import { createRouter } from "./routes.js";
 
@@ -24,8 +24,10 @@ app.get("/api/health", (_req, res) => {
   res.json({ ok: true });
 });
 
+// Public, so the unlock screen can show the app's name before a key is entered.
 app.get("/api/auth", (_req, res) => {
-  res.json({ required: Boolean(API_KEY) });
+  const { app_name, app_tagline } = getSettings(db);
+  res.json({ required: Boolean(API_KEY), app_name, app_tagline });
 });
 
 app.use("/api", (req, res, next) => {

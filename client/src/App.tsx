@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { App as AntdApp, Button, Card, Form, Input, Typography } from "antd";
-import { AuthError, fetchAuthStatus, getApiKey, setApiKey } from "./api";
+import { AuthError, fetchAuthStatus, fetchSettings, getApiKey, setApiKey } from "./api";
+import { applySettings } from "./settings";
 import AppLayout from "./layout/AppLayout";
 import CatalogPage from "./pages/CatalogPage";
 import ImportPage from "./pages/ImportPage";
@@ -15,6 +16,22 @@ export default function App() {
   const { message } = AntdApp.useApp();
   const [ready, setReady] = useState(false);
   const [needsKey, setNeedsKey] = useState(false);
+  const [brand, setBrand] = useState({ app_name: "", app_tagline: "" });
+
+  // Settings come from the database and must be in place before any page renders.
+  async function start() {
+    try {
+      applySettings(await fetchSettings());
+      setNeedsKey(false);
+      setReady(true);
+    } catch (err) {
+      if (err instanceof AuthError) {
+        setNeedsKey(true);
+        return;
+      }
+      message.error(err instanceof Error ? err.message : "Could not reach the API");
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -22,15 +39,11 @@ export default function App() {
       try {
         const status = await fetchAuthStatus();
         if (cancelled) return;
+        setBrand(status);
         if (status.required && !getApiKey()) setNeedsKey(true);
-        else setReady(true);
+        else await start();
       } catch (err) {
-        if (err instanceof AuthError) {
-          if (!cancelled) setNeedsKey(true);
-          return;
-        }
         message.error(err instanceof Error ? err.message : "Could not reach the API");
-        if (!cancelled) setReady(true);
       }
     })();
     return () => {
@@ -44,8 +57,8 @@ export default function App() {
         <div className="login-stack">
           <div className="login-hero">
             <img src="/logo.svg" alt="" />
-            <h1>Stocked</h1>
-            <p>Your household inventory, purchase by purchase.</p>
+            <h1>{brand.app_name}</h1>
+            <p>{brand.app_tagline}</p>
           </div>
         <Card className="login-card" title="Unlock">
           <Typography.Paragraph type="secondary">
@@ -56,8 +69,7 @@ export default function App() {
             layout="vertical"
             onFinish={(values: { key: string }) => {
               setApiKey(values.key.trim());
-              setNeedsKey(false);
-              setReady(true);
+              void start();
             }}
           >
             <Form.Item

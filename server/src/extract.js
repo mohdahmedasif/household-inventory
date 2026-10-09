@@ -1,25 +1,28 @@
 import { GoogleGenAI } from "@google/genai";
 import { sentenceCase, titleCase } from "./catalog.js";
+import { config } from "./config.js";
+import { blankIfPlaceholder } from "./validate.js";
 
-const EXTRACTION_SYSTEM_INSTRUCTION = `Extract one household inventory item — a pantry/grocery item OR a medicine/supplement — into a JSON object with keys: name, brand, category, location, package_type, package_count, units_per_package, size_value, size_unit, expiry_date, notes.
-name MUST be a real, concrete product or medicine name in English (translate from the user's language or label text if needed). For a branded medicine use the label's product name (e.g. 'Nexpro-20 Tablets'); if only the generic/active ingredient is known, use that (e.g. 'Pantoprazol'). For groceries use the plain English product name (e.g. 'Chickpeas', 'Sella Basmati Rice'). Never use Unknown, N/A, or a placeholder.
-brand = manufacturer/company if identifiable from the text or label (e.g. 'Freshona', 'Aristo', 'K-Classic'); else leave blank.
-category MUST be exactly one of the allowed categories listed below. Use 'Medicine' for drugs/OTC treatments, 'Supplement' for vitamins/herbal/wellness products when those options exist, and the closest grocery category for food/pantry items — never invent a new category.
-location MUST be exactly one of the allowed locations listed below. Default to the kitchen-style location for groceries and washroom-style for medicine/supplements unless the text clearly says otherwise.
-package_type MUST be exactly one of the allowed package types listed below (blister packs/strips → 'Tablet Strip' when available; loose pills in a bottle → 'Bottle'; canned food → 'Can'; jarred food → 'Jar'; boxed → 'Box').
-package_count = number of packs/strips/cans/bottles on hand (integer, default 1 if not stated).
-units_per_package = tablets/capsules/bottles per pack if known (e.g. tablets per strip); else leave blank (never write N/A).
-size_value/size_unit = the strength or size split into a plain number and its unit (e.g. '20 mg' -> size_value 20, size_unit mg; '500g' -> size_value 500, size_unit g); leave both blank if unknown.
-notes: for medicine/supplement, briefly say what it treats/is used for (symptoms/conditions) — infer from the drug/brand if the label doesn't spell it out; for groceries, leave blank unless there is something notable to record.
-expiry_date: convert to YYYY-MM-DD if provided, otherwise leave blank.
-Never write 'N/A' anywhere — use an empty string for unknown optional fields.`;
-
-const PLACEHOLDERS = new Set(["", "n/a", "na", "none", "null", "unknown", "-", "—"]);
-
-function blankIfPlaceholder(value) {
-  const text = String(value ?? "").trim();
-  if (!text || PLACEHOLDERS.has(text.toLowerCase())) return "";
-  return text;
+// The lists, defaults and language all come from the database, so the prompt
+// never names a particular category, location, package type or brand.
+function buildInstruction(categories, locations, packageTypes, settings) {
+  return [
+    "Extract one household inventory item (food, drink, medicine, supplement or household supply) into a JSON object with keys: name, brand, category, location, package_type, package_count, units_per_package, size_value, size_unit, expiry_date, notes.",
+    `name MUST be a real, concrete product name in ${settings.extract_language} (translate from the label or the user's text if needed). Use the product name printed on the label; if only a generic name or active ingredient is known, use that. Never use a placeholder.`,
+    "brand = the manufacturer or company if it can be identified from the text or label; otherwise leave blank.",
+    `category MUST be exactly one of the allowed categories. Pick the closest match and never invent a new one; if nothing fits, use "${settings.default_category}".`,
+    `location MUST be exactly one of the allowed locations. Pick the most plausible place for this kind of item unless the text says where it is kept; if unsure, use "${settings.default_location}".`,
+    `package_type MUST be exactly one of the allowed package types. Pick the one that best describes the packaging; if unsure, use "${settings.default_package_type}".`,
+    "package_count = number of packages on hand (integer, 1 if not stated).",
+    "units_per_package = pieces per package if known (for example tablets per strip); otherwise leave blank.",
+    "size_value/size_unit = the strength or size split into a plain number and its unit (for example '20 mg' -> size_value 20, size_unit mg); leave both blank if unknown.",
+    "notes: for a medicine or supplement, briefly say what it is used for, inferring from the product if the label does not say; for anything else leave blank unless there is something notable to record.",
+    "expiry_date: convert to YYYY-MM-DD if provided, otherwise leave blank.",
+    "Use an empty string for any unknown optional field.",
+    `Allowed categories: ${categories.join(", ")}.`,
+    `Allowed locations: ${locations.join(", ")}.`,
+    `Allowed package types: ${packageTypes.join(", ")}.`,
+  ].join("\n");
 }
 
 function coerceChoice(value, allowed, fallback) {
@@ -33,22 +36,13 @@ function coerceChoice(value, allowed, fallback) {
   return fallback || allowed[0] || "";
 }
 
-function coerceExpiry(value) {
-  const text = blankIfPlaceholder(value);
+function coerceExpiry(value, blankWords) {
+  const text = blankIfPlaceholder(value, blankWords);
   if (!text) return "";
   if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
   const parsed = Date.parse(text);
   if (Number.isNaN(parsed)) return "";
   return new Date(parsed).toISOString().slice(0, 10);
-}
-
-function buildInstruction(categories, locations, packageTypes) {
-  return (
-    EXTRACTION_SYSTEM_INSTRUCTION +
-    `\nAllowed categories: ${categories.join(", ")}.` +
-    `\nAllowed locations: ${locations.join(", ")}.` +
-    `\nAllowed package types: ${packageTypes.join(", ")}.`
-  );
 }
 
 function buildSchema(categories, locations, packageTypes) {
@@ -84,56 +78,33 @@ function buildSchema(categories, locations, packageTypes) {
 }
 
 function normalizeDraft(raw, catalog, settings) {
-  const categories = catalog.categories?.length ? catalog.categories : ["Canned Goods"];
-  const locations = catalog.locations?.length ? catalog.locations : ["Kitchen Cabinet"];
-  const packageTypes = catalog.package_types?.length ? catalog.package_types : ["Pack"];
-  const defaults = {
-    category: settings?.default_category || catalog.defaults?.category || categories[0],
-    location: settings?.default_location || catalog.defaults?.location || locations[0],
-    package_type:
-      settings?.default_package_type || catalog.defaults?.package_type || packageTypes[0],
-    package_count: 1,
-  };
+  const blank = (value) => blankIfPlaceholder(value, settings.blank_words);
 
   let packageCount = Number(raw?.package_count);
-  if (!Number.isFinite(packageCount) || packageCount < 0) packageCount = defaults.package_count;
+  if (!Number.isFinite(packageCount) || packageCount < 0) packageCount = 1;
 
-  const units = blankIfPlaceholder(raw?.units_per_package);
+  const units = blank(raw?.units_per_package);
   const unitsMatch = units.match(/\d+/);
 
   return {
-    name: titleCase(blankIfPlaceholder(raw?.name)),
-    company: titleCase(blankIfPlaceholder(raw?.brand || raw?.company)),
-    category: coerceChoice(raw?.category, categories, defaults.category),
-    location: coerceChoice(raw?.location, locations, defaults.location),
-    package_type: coerceChoice(raw?.package_type, packageTypes, defaults.package_type),
+    name: titleCase(blank(raw?.name), settings.lowercase_units),
+    company: titleCase(blank(raw?.brand || raw?.company), settings.lowercase_units),
+    category: coerceChoice(raw?.category, catalog.categories, settings.default_category),
+    location: coerceChoice(raw?.location, catalog.locations, settings.default_location),
+    package_type: coerceChoice(
+      raw?.package_type,
+      catalog.package_types,
+      settings.default_package_type,
+    ),
     package_count: Math.max(0, Math.trunc(packageCount)),
     units_per_package: unitsMatch ? unitsMatch[0] : units,
-    size_value: blankIfPlaceholder(raw?.size_value),
-    size_unit: blankIfPlaceholder(raw?.size_unit),
-    expiry_date: coerceExpiry(raw?.expiry_date),
-    notes: sentenceCase(blankIfPlaceholder(raw?.notes)),
+    size_value: blank(raw?.size_value),
+    size_unit: blank(raw?.size_unit),
+    expiry_date: coerceExpiry(raw?.expiry_date, settings.blank_words),
+    notes: sentenceCase(blank(raw?.notes)),
     batch_notes: "",
   };
 }
-
-function geminiApiKey() {
-  return (
-    process.env.INVENTORY_GEMINI_API_KEY?.trim() ||
-    process.env.GEMINI_API_KEY?.trim() ||
-    ""
-  );
-}
-
-function geminiModel() {
-  return process.env.GEMINI_MODEL?.trim() || "gemini-flash-latest";
-}
-
-function geminiFallbackModel() {
-  return process.env.GEMINI_FALLBACK_MODEL?.trim() || "gemini-flash-lite-latest";
-}
-
-const RETRY_DELAYS_MS = [800, 2000];
 
 function isOverloaded(err) {
   const status = Number(err?.status);
@@ -144,16 +115,17 @@ function isOverloaded(err) {
 // Gemini sheds load with 503/429 during demand spikes: retry the primary
 // model briefly, then try the fallback model once before giving up.
 async function generateWithRetry(ai, request) {
-  const primary = geminiModel();
-  const fallback = geminiFallbackModel();
+  const primary = config.geminiModel;
+  const fallback = config.geminiFallbackModel;
+  const delays = config.geminiRetryDelaysMs;
   let lastError;
-  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt += 1) {
+  for (let attempt = 0; attempt <= delays.length; attempt += 1) {
     try {
       return await ai.models.generateContent({ ...request, model: primary });
     } catch (err) {
       if (!isOverloaded(err)) throw err;
       lastError = err;
-      const delay = RETRY_DELAYS_MS[attempt];
+      const delay = delays[attempt];
       if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
     }
   }
@@ -169,7 +141,7 @@ export async function extractItem({
   catalog,
   settings,
 }) {
-  const apiKey = geminiApiKey();
+  const apiKey = config.geminiApiKey;
   if (!apiKey) {
     const err = new Error(
       "Gemini is not configured. Set GEMINI_API_KEY (or INVENTORY_GEMINI_API_KEY) on the server.",
@@ -214,10 +186,10 @@ export async function extractItem({
       },
     ],
     config: {
-      systemInstruction: buildInstruction(categories, locations, packageTypes),
+      systemInstruction: buildInstruction(categories, locations, packageTypes, settings),
       responseMimeType: "application/json",
       responseJsonSchema: buildSchema(categories, locations, packageTypes),
-      temperature: 0.2,
+      temperature: config.geminiTemperature,
     },
   };
   let response;

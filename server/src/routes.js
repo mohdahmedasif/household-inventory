@@ -1,6 +1,7 @@
 import { Router } from "express";
 import multer from "multer";
-import { parseKind } from "./catalog.js";
+import { SETTINGS_SCHEMA, coerceSetting, parseKind } from "./catalog.js";
+import { config } from "./config.js";
 import {
   findOrCreateCompany,
   findProductByNameCategory,
@@ -20,6 +21,7 @@ import {
   nextProductId,
   normalizeKey,
   pruneCompany,
+  saveSetting,
   setBatchIdSeq,
   setMeta,
   setProductIdSeq,
@@ -37,9 +39,10 @@ import {
   parseProductId,
 } from "./validate.js";
 
-const upload = multer({
+// Built per router so the size limit is read after .env has been loaded.
+const createUpload = () => multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 8 * 1024 * 1024, files: 1 },
+  limits: { fileSize: config.maxUploadBytes, files: 1 },
   fileFilter(_req, file, cb) {
     if (ALLOWED_IMAGE_TYPES.has(String(file.mimetype || "").toLowerCase())) {
       cb(null, true);
@@ -97,6 +100,7 @@ function countBy(items, field) {
 
 export function createRouter(db) {
   const router = Router();
+  const upload = createUpload();
 
   const insertProductStmt = db.prepare(`
     INSERT INTO products (product_id, name, name_key, category, notes, last_updated)
@@ -373,14 +377,6 @@ export function createRouter(db) {
     const target = db.prepare("SELECT * FROM products WHERE product_id = ?").get(targetId);
     if (!target) throw notFound("Target product not found.");
 
-    if (normalizeKey(source.name) !== normalizeKey(target.name)) {
-      const label = `Merged from: ${source.name}`;
-      db.prepare(
-        `UPDATE batches
-         SET notes = CASE WHEN trim(notes) = '' THEN ? ELSE notes || ' · ' || ? END
-         WHERE product_id = ?`,
-      ).run(label, label, sourceId);
-    }
     db.prepare("UPDATE batches SET product_id = ? WHERE product_id = ?").run(targetId, sourceId);
     db.prepare("UPDATE stock_events SET product_id = ? WHERE product_id = ?").run(
       targetId,
@@ -685,28 +681,18 @@ export function createRouter(db) {
   router.patch("/settings", (req, res) => {
     try {
       const body = req.body && typeof req.body === "object" ? req.body : {};
-      const catalog = getCatalog(db);
-      if (body.default_category !== undefined) {
-        const value = String(body.default_category).trim();
-        if (!catalog.categories.includes(value)) {
-          throw badRequest("default_category must be an existing category.");
+      const save = db.transaction(() => {
+        for (const [key, spec] of Object.entries(SETTINGS_SCHEMA)) {
+          if (body[key] === undefined) continue;
+          const value = coerceSetting(spec, body[key]);
+          if (value === null) throw badRequest(`${key} is not a valid value.`);
+          if (spec.type === "choice" && !listCatalogNames(db, spec.kind).includes(value)) {
+            throw badRequest(`${key} must be one of the existing options.`);
+          }
+          saveSetting(db, key, value);
         }
-        setMeta(db, "default_category", value);
-      }
-      if (body.default_location !== undefined) {
-        const value = String(body.default_location).trim();
-        if (!catalog.locations.includes(value)) {
-          throw badRequest("default_location must be an existing location.");
-        }
-        setMeta(db, "default_location", value);
-      }
-      if (body.default_package_type !== undefined) {
-        const value = String(body.default_package_type).trim();
-        if (!catalog.package_types.includes(value)) {
-          throw badRequest("default_package_type must be an existing package type.");
-        }
-        setMeta(db, "default_package_type", value);
-      }
+      });
+      save();
       res.json(getSettings(db));
     } catch (err) {
       sendError(res, err);
@@ -1095,6 +1081,7 @@ export function createRouter(db) {
         batches.map((b) => ({ company: b.company || "Unknown" })),
         "company",
       );
+      const soonDays = getSettings(db).expiring_soon_days;
       const expired = [];
       const expiringSoon = [];
       let zeroCount = 0;
@@ -1113,7 +1100,7 @@ export function createRouter(db) {
           days_until: days,
         };
         if (days < 0) expired.push(entry);
-        else if (days <= 30) expiringSoon.push(entry);
+        else if (days <= soonDays) expiringSoon.push(entry);
       }
       expired.sort((a, b) => a.days_until - b.days_until);
       expiringSoon.sort((a, b) => a.days_until - b.days_until);

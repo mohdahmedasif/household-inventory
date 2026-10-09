@@ -11,6 +11,7 @@ import {
 } from "@ant-design/icons";
 import { Button, Drawer, Layout } from "antd";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { settings } from "../settings";
 import { PAGE_ACTIONS_ID, type LayoutContext, type PageTitleOverride } from "./PageActions";
 
 const { Sider, Content } = Layout;
@@ -59,8 +60,8 @@ function Brand({ to = "/" }: { to?: string }) {
     <Link to={to} className="brand">
       <img className="brand-mark" src="/logo.svg" alt="" />
       <span className="brand-text">
-        <span>Household inventory</span>
-        <strong>Stocked</strong>
+        <span>{settings().app_tagline}</span>
+        <strong>{settings().app_name}</strong>
       </span>
     </Link>
   );

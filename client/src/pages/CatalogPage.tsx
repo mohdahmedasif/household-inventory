@@ -4,10 +4,12 @@ import {
   addCatalogOption,
   deleteCatalogOption,
   fetchCatalog,
+  fetchSettings,
   renameCatalogOption,
   type Catalog,
   type CatalogKind,
 } from "../api";
+import { applySettings } from "../settings";
 
 const TABS: {
   key: CatalogKind;
@@ -68,6 +70,8 @@ export default function CatalogPage() {
     setBusy(true);
     try {
       setCatalog(await renameCatalogOption(kind, from, to));
+      // A renamed option may have been one of the defaults.
+      applySettings(await fetchSettings());
       setRenaming(null);
       message.success("Renamed");
     } catch (err) {

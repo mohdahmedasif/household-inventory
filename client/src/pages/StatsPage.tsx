@@ -4,6 +4,7 @@ import { App as AntdApp, Card, Skeleton } from "antd";
 import { CheckCircleOutlined, ClockCircleOutlined } from "@ant-design/icons";
 import { fetchStats, type Stats } from "../api";
 import { categoryColor, expiryLabel, expiryTone } from "../format";
+import { settings } from "../settings";
 
 type Tone = "default" | "accent" | "warn" | "danger";
 type CountRow = { name: string; value: number };
@@ -81,7 +82,7 @@ export default function StatsPage() {
       (stats?.by_company ?? [])
         .filter((row) => row.name && row.name !== "Unknown")
         .sort(byValue)
-        .slice(0, 8),
+        .slice(0, settings().top_companies_count),
     [stats],
   );
 
@@ -114,7 +115,7 @@ export default function StatsPage() {
         <Kpi
           label="Expiring soon"
           value={stats.expiring_soon_count}
-          caption="Within the next 30 days"
+          caption={`Within the next ${settings().expiring_soon_days} days`}
           tone={stats.expiring_soon_count ? "warn" : "default"}
         />
         <Kpi
@@ -141,7 +142,9 @@ export default function StatsPage() {
           {attention.length === 0 ? (
             <div className="overview-clear">
               <CheckCircleOutlined />
-              <span>Nothing expired, and nothing expiring in the next 30 days.</span>
+              <span>
+                Nothing expired, and nothing expiring in the next {settings().expiring_soon_days} days.
+              </span>
             </div>
           ) : (
             <ul className="attention-list">

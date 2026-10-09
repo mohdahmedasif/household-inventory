@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
-import { DEFAULT_SEEDS, DEFAULT_SETTINGS, sentenceCase, titleCase } from "./catalog.js";
+import { DEFAULT_SEEDS, SETTINGS_SCHEMA, coerceSetting, sentenceCase, titleCase } from "./catalog.js";
+import { config } from "./config.js";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS products (
@@ -74,7 +75,6 @@ export function createDb(filePath) {
   db.pragma("foreign_keys = ON");
   db.exec(SCHEMA);
   migrateFromItems(db);
-  capitalizeNames(db);
   ensureSeq(db, "product_id_seq", "products", "product_id");
   ensureSeq(db, "company_id_seq", "companies", "company_id");
   ensureSeq(db, "batch_id_seq", "batches", "batch_id");
@@ -82,14 +82,17 @@ export function createDb(filePath) {
   ensureSeq(db, "id_seq", "batches", "batch_id");
   seedCatalog(db);
   seedSettings(db);
+  capitalizeNames(db);
   return db;
 }
 
 // Rows saved before names and notes were capitalized on write (name_key is unaffected).
 function capitalizeNames(db) {
+  const units = getSettings(db).lowercase_units;
+  const title = (value) => titleCase(value, units);
   const targets = [
-    ["products", "product_id", "name", titleCase],
-    ["companies", "company_id", "name", titleCase],
+    ["products", "product_id", "name", title],
+    ["companies", "company_id", "name", title],
     ["products", "product_id", "notes", sentenceCase],
     ["batches", "batch_id", "notes", sentenceCase],
   ];
@@ -257,8 +260,8 @@ function seedSettings(db) {
   const upsert = db.prepare(
     "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING",
   );
-  for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
-    upsert.run(key, value);
+  for (const [key, spec] of Object.entries(SETTINGS_SCHEMA)) {
+    upsert.run(key, serializeSetting(spec.initial));
   }
 }
 
@@ -282,29 +285,40 @@ export function listCatalogNames(db, kind) {
     .map((row) => row.name);
 }
 
+function serializeSetting(value) {
+  return Array.isArray(value) ? JSON.stringify(value) : String(value);
+}
+
+export function saveSetting(db, key, value) {
+  setMeta(db, key, serializeSetting(value));
+}
+
+/** All settings, typed. A default that no longer exists in its list falls back to the first option. */
+export function getSettings(db) {
+  const settings = {};
+  for (const [key, spec] of Object.entries(SETTINGS_SCHEMA)) {
+    const stored = db.prepare("SELECT value FROM meta WHERE key = ?").get(key);
+    const value = stored ? coerceSetting(spec, stored.value) : null;
+    settings[key] = value ?? spec.initial;
+    if (spec.type === "choice") {
+      const options = listCatalogNames(db, spec.kind);
+      if (!options.includes(settings[key])) settings[key] = options[0] ?? "";
+    }
+  }
+  return settings;
+}
+
 export function getCatalog(db) {
+  const settings = getSettings(db);
   return {
     categories: listCatalogNames(db, "category"),
     locations: listCatalogNames(db, "location"),
     package_types: listCatalogNames(db, "package_type"),
     defaults: {
-      category: getMeta(db, "default_category", DEFAULT_SETTINGS.default_category),
-      location: getMeta(db, "default_location", DEFAULT_SETTINGS.default_location),
-      package_type: getMeta(
-        db,
-        "default_package_type",
-        DEFAULT_SETTINGS.default_package_type,
-      ),
+      category: settings.default_category,
+      location: settings.default_location,
+      package_type: settings.default_package_type,
     },
-  };
-}
-
-export function getSettings(db) {
-  const catalog = getCatalog(db);
-  return {
-    default_category: catalog.defaults.category,
-    default_location: catalog.defaults.location,
-    default_package_type: catalog.defaults.package_type,
   };
 }
 
@@ -362,7 +376,7 @@ export function logStockEvent(db, { productId, batchId, kind, delta, countAfter,
   ).run(productId, batchId, kind, delta, countAfter, createdAt || new Date().toISOString());
 }
 
-export function listStockEvents(db, productId, limit = 100) {
+export function listStockEvents(db, productId, limit = config.historyLimit) {
   return db
     .prepare(
       `SELECT event_id, batch_id, kind, delta, count_after, created_at
@@ -463,7 +477,12 @@ export function nameSimilarity(a, b) {
  * Existing products that look like the same thing as `name`.
  * An exact name+category match is flagged with `exact: true`.
  */
-export function findSimilarProducts(db, name, category, { limit = 3, threshold = 0.8 } = {}) {
+export function findSimilarProducts(
+  db,
+  name,
+  category,
+  { limit = config.similarLimit, threshold = config.similarityThreshold } = {},
+) {
   const nameKey = normalizeKey(name);
   const cat = String(category ?? "").trim().toLowerCase();
   if (!nameKey) return [];
@@ -472,7 +491,7 @@ export function findSimilarProducts(db, name, category, { limit = 3, threshold =
     const sameCategory = product.category.toLowerCase() === cat;
     const exact = sameCategory && normalizeKey(product.name) === nameKey;
     const score = exact ? 1 : nameSimilarity(name, product.name);
-    const needed = sameCategory ? threshold : 0.95;
+    const needed = sameCategory ? threshold : config.similarityAcrossCategories;
     if (exact || score >= needed) {
       scored.push({ ...product, score: Number(score.toFixed(2)), exact, same_category: sameCategory });
     }

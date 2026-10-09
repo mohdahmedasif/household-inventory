@@ -1,11 +1,12 @@
-import { BLANK_PLACEHOLDERS, WRITABLE_FIELDS, sentenceCase, titleCase } from "./catalog.js";
+import { WRITABLE_FIELDS, sentenceCase, titleCase } from "./catalog.js";
 import { getCatalog, getSettings } from "./db.js";
 
 const SHEETS_EPOCH = Date.UTC(1899, 11, 30);
 
-export function blankIfPlaceholder(value) {
+/** Empty string for nothing, or for one of the blank_words from Settings ("n/a", "none", …). */
+export function blankIfPlaceholder(value, blankWords = []) {
   const text = String(value ?? "").trim();
-  if (!text || BLANK_PLACEHOLDERS.has(text.toLowerCase())) return "";
+  if (!text || blankWords.includes(text.toLowerCase())) return "";
   return text;
 }
 
@@ -58,11 +59,12 @@ export function normalizeProduct(db, raw = {}, { partial = false } = {}) {
     out[field] = transform(source[field]);
   };
 
-  take("name", (v) => titleCase(blankIfPlaceholder(v)));
+  const blank = (v) => blankIfPlaceholder(v, settings.blank_words);
+  take("name", (v) => titleCase(blank(v), settings.lowercase_units));
   take("category", (v) =>
     coerceChoice(v, catalog.categories, settings.default_category),
   );
-  take("notes", (v) => sentenceCase(blankIfPlaceholder(v)));
+  take("notes", (v) => sentenceCase(blank(v)));
 
   if (!partial && !out.name) {
     const err = new Error("Name is required.");
@@ -88,11 +90,13 @@ export function normalizeBatch(db, raw = {}, { partial = false } = {}) {
     out[field] = transform(source[field]);
   };
 
+  const blank = (v) => blankIfPlaceholder(v, settings.blank_words);
+
   // brand / company are aliases for the company name
   if (!partial || source.company !== undefined || source.brand !== undefined) {
     const companyRaw =
       source.company !== undefined ? source.company : source.brand;
-    out.company = titleCase(blankIfPlaceholder(companyRaw));
+    out.company = titleCase(blank(companyRaw), settings.lowercase_units);
   }
 
   take("location", (v) =>
@@ -102,11 +106,11 @@ export function normalizeBatch(db, raw = {}, { partial = false } = {}) {
     coerceChoice(v, catalog.package_types, settings.default_package_type),
   );
   take("package_count", (v) => coercePackageCount(v, partial ? 0 : 1));
-  take("units_per_package", (v) => blankIfPlaceholder(v));
-  take("size_value", (v) => blankIfPlaceholder(v));
-  take("size_unit", (v) => blankIfPlaceholder(v));
+  take("units_per_package", blank);
+  take("size_value", blank);
+  take("size_unit", blank);
   take("expiry_date", (v) => coerceDate(v));
-  take("notes", (v) => sentenceCase(blankIfPlaceholder(v)));
+  take("notes", (v) => sentenceCase(blank(v)));
   if (!partial || source.acquired_on !== undefined || source.last_updated !== undefined) {
     const stamp = source.acquired_on !== undefined ? source.acquired_on : source.last_updated;
     out.acquired_on = coerceDate(stamp) || "";

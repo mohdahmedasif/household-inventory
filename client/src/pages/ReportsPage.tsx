@@ -14,6 +14,7 @@ import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
 import { fetchCatalog, fetchReportRows, type Catalog, type ReportRow } from "../api";
 import { daysUntil, expiryTone, sizeLabel } from "../format";
+import { settings } from "../settings";
 
 type Col = {
   key: string;
@@ -228,7 +229,8 @@ export default function ReportsPage() {
       const content = col.render ? col.render(row) : col.value(row);
       if (content === "" || content == null) return <span className="report-blank">—</span>;
       if (col.key === "days_left" && typeof content === "number") {
-        const tone = content < 0 ? "expired" : content <= 30 ? "soon" : "ok";
+        const tone =
+          content < 0 ? "expired" : content <= settings().expiring_soon_days ? "soon" : "ok";
         return <span className={`report-days ${tone}`}>{content}</span>;
       }
       return content;
