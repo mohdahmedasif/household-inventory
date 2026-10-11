@@ -1,156 +1,158 @@
-# Household Inventory
+# Stocked
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3D6B4F" alt="MIT License"></a>
   <img src="https://img.shields.io/badge/node-%3E%3D20-339933" alt="Node 20+">
-  <a href="https://github.com/mohdahmedasif/household-inventory/issues?q=is%3Aissue+is%3Aopen+label%3A%22good%20first%20issue%22"><img src="https://img.shields.io/badge/good%20first%20issue-welcome-7057ff" alt="Good first issues"></a>
+  <img src="https://img.shields.io/badge/react-19-61DAFB" alt="React 19">
+  <img src="https://img.shields.io/badge/sqlite-local-0f766e" alt="SQLite">
+  <a href="https://github.com/mohdahmedasif/household-inventory/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22"><img src="https://img.shields.io/badge/good%20first%20issue-welcome-7057ff" alt="Good first issues"></a>
 </p>
 
-Open-source household pantry app: a **React** web UI backed by **SQLite**, an **Express** API, and optional **Google Gemini** photo extract.
+**Self-hosted household pantry** for groceries, medicine and supplies. Track what you own, where it lives, and when it expires — with an optional Gemini photo scan that fills the add form for you.
 
-In development Vite proxies `/api` to Express. In Docker (and production) Express serves the built SPA and the REST API from one process.
+## Why
+
+Spreadsheets drift. Stocked keeps a clean product list, every purchase as its own batch, and a simple web UI you can run at home or on a VPS.
 
 ## Features
 
-- Track products and purchase batches (count, location, size, expiry)
-- Search and filter the pantry; overview charts and a spreadsheet-style report
-- Add from a photo — Gemini fills the form for review
-- Editable catalog lists (categories, locations, package types)
-- Import from a Google Sheets CSV export
+| | |
+|---|---|
+| **Pantry** | Search, filter by category or location, sort by name, expiry, or stock |
+| **Products & batches** | One product, many purchases — on hand is the sum of batch counts |
+| **Photo add** | Pick or take a label photo; Gemini drafts the fields for review |
+| **History** | Every change in a batch's count is logged per product |
+| **Overview** | What needs attention, plus counts by category, location and company |
+| **Reports** | Spreadsheet-style table with CSV export and print |
+| **Catalog** | Edit categories, locations, package types, units and text rules in place |
+| **Backup** | Download everything as one file and restore it on a fresh install |
+| **Import** | Bring in an old Google Sheets CSV |
 
-## Architecture
+## Stack
 
 ```text
-server/     → Express + SQLite REST API (`/api`), serves `dist` in production
-client/     → React 19 / Vite / Ant Design SPA
-scripts/    → deploy, sheet import, UI screenshots
-deploy/     → systemd unit for the Node API
+client/   React 19 · Vite · Ant Design
+server/   Express · better-sqlite3 · optional Gemini extract
+deploy/   Docker Compose · systemd unit
 ```
 
-## Requirements
-
-- Node.js 20+
-- Optional: [Google AI Studio](https://aistudio.google.com/) Gemini API key (photo extract)
+In **dev**, Vite serves the UI on `:5173` and proxies `/api` to Express on `:3000`.
+In **production / Docker**, Express serves the built SPA and API from one process.
 
 ## Quick start
+
+**Requirements:** Node.js 20+. Optional: a [Gemini API key](https://aistudio.google.com/) for photo extract.
 
 ```bash
 git clone https://github.com/mohdahmedasif/household-inventory.git
 cd household-inventory
-copy .env.example .env   # or: cp .env.example .env
 npm install
 npm run install:all
-```
-
-Fill `.env` (see below), then:
-
-```bash
 npm run dev
 ```
 
-Open **http://127.0.0.1:5173** (Vite proxies `/api` to Express on `:3000`).
+Open **http://127.0.0.1:5173**.
 
-Production-style (Express serves the built SPA):
+### Production build (local)
 
 ```bash
 npm run build
 npm start
 ```
 
-Then open **http://127.0.0.1:3000**.
+Open **http://127.0.0.1:3000**.
 
 ### Docker
 
 ```bash
-docker compose up --build
+docker compose up -d --build
 ```
 
-Express serves the Vite bundle from `dist`; SQLite lives in the `household-inventory-data` volume. The port defaults to 3000; set `PORT` to use another one.
+- App: **http://127.0.0.1:3000** (or the `PORT` you set)
+- Data: Docker volume `household-inventory-data`
 
 ## Configuration
 
-Copy `.env.example` → `.env`.
+The app reads two environment variables, both optional. Copy [`.env.example`](.env.example) → `.env` to set them.
 
-```env
-PORT=3030
-KEY=choose-a-long-random-string
-```
+| Variable | Purpose |
+|----------|---------|
+| `PORT` | The port the app is opened on (default `3000`) |
+| `KEY` | A password for the API and web UI (`Authorization: Bearer …`). Leave unset only on a network you trust. |
 
-Those are the only two variables, and both are optional: the port the app is opened on
-(default 3000) and a password for it.
+Everything else is set in the app and stored in the database:
 
-`KEY` protects the REST API and web UI (`Authorization: Bearer …`). If unset, the API is open on that host.
+- **Settings** — expiry windows, list sizes, the Gemini model, app name, and Gemini API keys.
+- **Catalog** — categories, locations, package types, units, and the text rules.
 
-Gemini API keys (for reading product photos) are not set here. Add them under **Settings → Gemini API keys**; they are stored encrypted in the database, and the encryption key lives in `secret.key` in the data directory.
+Gemini API keys are stored encrypted. The encryption key is the `secret.key` file in the data directory; without it, saved keys cannot be read and must be entered again.
 
-Never commit `.env` — it is gitignored. Do not paste API keys into issues or pull requests.
+Never commit `.env`, `secret.key`, a database, or a backup file. Don't paste keys into issues or PRs.
 
-## Inventory schema
-
-Inventory is modeled as **products**, **companies**, and **purchase batches**:
+## Data model
 
 | Entity | Meaning |
 |--------|---------|
-| **Product** | The thing you stock (matched by normalized name + category) |
-| **Company** | Brand / manufacturer on a purchase |
-| **Batch** | One purchase/lot — count on hand, location, size, expiry, acquired date |
+| **Product** | The thing you stock (matched by name + category) |
+| **Company** | Brand on a purchase |
+| **Batch** | One purchase — count, location, size, expiry, acquired date |
 
-- Same product bought twice (even from different companies) stays one product with two batches.
-- **Times purchased** = number of batches. **On hand** = sum of batch `package_count`.
-- Sheet CSV `item_id` is kept as `batch_id` (deleted ids are never reused). Sheet `brand` becomes the company; `last_updated` becomes `acquired_on`.
-- Categories / locations / package types are editable catalog lists.
+- Buy the same product twice → one product, two batches.
+- Add a purchase identical to an existing batch → that batch's count goes up.
+- **On hand** = sum of batch counts.
+
+### Backup and restore
+
+**Import → Full backup** downloads one JSON file with every product, purchase, history entry, catalog list and setting. Restoring it replaces everything in the app with the file's contents. Gemini API keys are not part of the backup.
 
 ### Import from Google Sheets
 
-1. Open the sheet tab → **File → Download → Comma Separated Values (.csv)**
-2. Save as `data/inventory-export.csv` (or paste into the web **Import** page)
-3. Run:
+1. Sheet tab → **File → Download → CSV**
+2. Use the web **Import** page, or save as `data/inventory-export.csv` and run:
 
 ```bash
 npm run import:sheet
 # or: node scripts/import-sheet-csv.mjs path/to/export.csv
 ```
 
-Rows with the same name + category collapse into one product; each row becomes a purchase batch.
+Rows with the same name + category merge into one product; each row becomes a batch.
 
-## Deploying on a VPS
+## Deploy
 
-### One-time setup
+### Docker on a VPS
 
 ```bash
 git clone https://github.com/mohdahmedasif/household-inventory.git
 cd household-inventory
-cp .env.example .env   # fill secrets
-npm run install:all
-npm run build
+cp .env.example .env   # set KEY
+docker compose up -d --build
+```
 
+### systemd (Node)
+
+```bash
+npm run install:all && npm run build
 sudo cp deploy/inventory.service /etc/systemd/system/inventory.service
-# edit User= / paths
+# edit User= and paths, then:
 sudo systemctl daemon-reload
 sudo systemctl enable --now inventory
 ```
 
-Or with Docker:
-
-```bash
-docker compose up -d --build
-```
-
 ### Updating
 
-On the server, [`scripts/deploy.sh`](scripts/deploy.sh) pulls `main`, installs dependencies,
-rebuilds the SPA and restarts the app:
+On the server, [`scripts/deploy.sh`](scripts/deploy.sh) pulls `main`, installs dependencies, rebuilds the SPA and restarts the app:
 
 ```bash
 bash scripts/deploy.sh
 ```
 
+Put the app behind HTTPS and set `KEY` whenever it is reachable from the internet.
+
 ## Contributing
 
-Issues and pull requests are welcome. See [CONTRIBUTING.md](./CONTRIBUTING.md).
-
-Browse [good first issues](https://github.com/mohdahmedasif/household-inventory/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22) if you want a small place to start.
+PRs and issues welcome — see [CONTRIBUTING.md](./CONTRIBUTING.md).
+Security reports: [SECURITY.md](./SECURITY.md).
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+[MIT](LICENSE)

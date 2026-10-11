@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { chromium } from "playwright";
 
-const BASE = process.env.UI_BASE_URL || "http://127.0.0.1:3030";
+const BASE = process.env.UI_BASE_URL || "http://127.0.0.1:3000";
 const OUT = path.resolve("tmp/ui-shots");
 const API_KEY = process.env.KEY || "";
 

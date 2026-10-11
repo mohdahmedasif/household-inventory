@@ -1,8 +1,10 @@
 # Secrets & local config
 .env
-.env.local
+.env.*
+!.env.example
+*.pem
+*.key
 credentials.json
-secret.key
 **/credentials*.json
 **/settings.yaml
 **/settings.local.yaml
@@ -35,3 +37,11 @@ data/
 *.sqlite-journal
 *.sqlite-wal
 *.sqlite-shm
+
+# Personal inventory dumps / exports (never commit real pantry data)
+*.csv
+inventory-export*
+**/inventory-export*
+inventory-backup*.json
+**/inventory-backup*.json
+before-last-restore.json

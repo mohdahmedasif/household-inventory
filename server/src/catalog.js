@@ -9,10 +9,10 @@ export const CATEGORIES = [
 ];
 
 export const STORAGE_LOCATIONS = [
-  "Sofa Storage",
+  "Pantry",
   "Kitchen Cabinet",
-  "Basement",
-  "Washroom Cabinet",
+  "Fridge",
+  "Bathroom Cabinet",
 ];
 
 export const PACKAGE_TYPES = [
@@ -124,7 +124,7 @@ export function parseKind(raw) {
   return null;
 }
 
-/** Capitalize only the first letter, for free-text notes ("walnut" → "Walnut"). */
+/** Capitalize only the first letter, for free-text notes ("sliced" → "Sliced"). */
 export function sentenceCase(value) {
   const text = String(value ?? "");
   return text.charAt(0).toUpperCase() + text.slice(1);

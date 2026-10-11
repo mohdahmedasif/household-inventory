@@ -21,7 +21,7 @@ restart_unit() {
   return 1
 }
 
-if restart_unit inventory.service || restart_unit telegram-inventory.service; then
+if restart_unit inventory.service; then
   exit 0
 fi
 
