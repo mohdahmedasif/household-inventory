@@ -1,31 +1,102 @@
 import { useEffect, useState } from "react";
-import { App as AntdApp, Button, Card, Form, Input, InputNumber, Select, Typography } from "antd";
 import {
-  fetchCatalog,
+  App as AntdApp,
+  Button,
+  Card,
+  Form,
+  Input,
+  InputNumber,
+  Popconfirm,
+  Select,
+  Typography,
+} from "antd";
+import dayjs from "dayjs";
+import {
+  addGeminiKey,
+  deleteGeminiKey,
+  fetchGeminiKeys,
+  fetchGeminiModels,
   fetchSettings,
   getApiKey,
   setApiKey,
+  testGeminiKey,
   updateSettings,
-  type Catalog,
+  type GeminiKeyList,
   type Settings,
 } from "../api";
 import { applySettings } from "../settings";
 
 export default function SettingsPage() {
   const { message } = AntdApp.useApp();
-  const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [apiKeyDraft, setApiKeyDraft] = useState(getApiKey());
   const [saving, setSaving] = useState(false);
   const [form] = Form.useForm<Settings>();
+  const [keyForm] = Form.useForm<{ key: string }>();
+  const [gemini, setGemini] = useState<GeminiKeyList>({ keys: [] });
+  const [models, setModels] = useState<{ value: string; label: string }[]>([]);
+  const [keyBusy, setKeyBusy] = useState<number | "add" | null>(null);
+
+  // The model list comes from Google, so it needs a working key.
+  function loadModels() {
+    fetchGeminiModels()
+      .then(({ models: rows }) =>
+        setModels(
+          rows.map((row) => ({
+            value: row.name,
+            label: row.label ? `${row.name} — ${row.label}` : row.name,
+          })),
+        ),
+      )
+      .catch(() => setModels([]));
+  }
+
+  async function onAddKey(values: { key: string }) {
+    setKeyBusy("add");
+    try {
+      setGemini(await addGeminiKey(values.key ?? ""));
+      keyForm.resetFields();
+      loadModels();
+      message.success("Key checked with Google and saved");
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : "Could not save the key");
+    } finally {
+      setKeyBusy(null);
+    }
+  }
+
+  async function onTestKey(keyId: number) {
+    setKeyBusy(keyId);
+    try {
+      const result = await testGeminiKey(keyId);
+      setGemini(result);
+      if (result.ok) message.success("Google accepts this key");
+      else message.error(result.error);
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : "Test failed");
+    } finally {
+      setKeyBusy(null);
+    }
+  }
+
+  async function onDeleteKey(keyId: number) {
+    try {
+      setGemini(await deleteGeminiKey(keyId));
+      loadModels();
+      message.success("Key removed");
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : "Could not remove the key");
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const [cat, prefs] = await Promise.all([fetchCatalog(), fetchSettings()]);
+        const prefs = await fetchSettings();
         if (cancelled) return;
-        setCatalog(cat);
         form.setFieldsValue(prefs);
+        setGemini(await fetchGeminiKeys());
+        loadModels();
       } catch (err) {
         message.error(err instanceof Error ? err.message : "Failed to load settings");
       }
@@ -49,9 +120,6 @@ export default function SettingsPage() {
     }
   }
 
-  const options = (values: string[] | undefined) =>
-    (values ?? []).map((value) => ({ value, label: value }));
-
   return (
     <>
       <p className="page-subheading">
@@ -59,35 +127,6 @@ export default function SettingsPage() {
       </p>
       <Form form={form} layout="vertical" onFinish={(values) => void onSave(values)}>
         <div className="form-sections">
-          <Card title="New product defaults" className="surface-card">
-            <div className="form-row">
-              <Form.Item
-                name="default_category"
-                label="Category"
-                className="form-field-wide"
-                rules={[{ required: true }]}
-              >
-                <Select options={options(catalog?.categories)} />
-              </Form.Item>
-              <Form.Item
-                name="default_location"
-                label="Location"
-                className="form-field-wide"
-                rules={[{ required: true }]}
-              >
-                <Select options={options(catalog?.locations)} />
-              </Form.Item>
-              <Form.Item
-                name="default_package_type"
-                label="Package type"
-                className="form-field-wide"
-                rules={[{ required: true }]}
-              >
-                <Select options={options(catalog?.package_types)} />
-              </Form.Item>
-            </div>
-          </Card>
-
           <Card title="Expiry" className="surface-card">
             <div className="form-row">
               <Form.Item
@@ -130,21 +169,27 @@ export default function SettingsPage() {
             </div>
           </Card>
 
-          <Card title="Text rules" className="surface-card">
-            <Form.Item
-              name="lowercase_units"
-              label="Units kept lowercase in names"
-              tooltip="Names are capitalized word by word, except these."
-            >
-              <Select mode="tags" tokenSeparators={[",", " "]} open={false} suffixIcon={null} />
-            </Form.Item>
-            <Form.Item
-              name="blank_words"
-              label="Words treated as empty"
-              tooltip="A field containing only one of these is saved as blank."
-            >
-              <Select mode="tags" tokenSeparators={[","]} open={false} suffixIcon={null} />
-            </Form.Item>
+          <Card title="Reading photos" className="surface-card">
+            <div className="form-row">
+              <Form.Item
+                name="gemini_model"
+                label="Gemini model"
+                className="form-field-wide"
+                rules={[{ required: true }]}
+                tooltip="The list shows the models your API key can use."
+              >
+                <Select showSearch options={models} placeholder="Add an API key to list models" />
+              </Form.Item>
+              <Form.Item
+                name="gemini_fallback_model"
+                label="Fallback model"
+                className="form-field-wide"
+                rules={[{ required: true }]}
+                tooltip="Used when the main model is overloaded."
+              >
+                <Select showSearch options={models} placeholder="Add an API key to list models" />
+              </Form.Item>
+            </div>
             <Form.Item
               name="extract_language"
               label="Language for names read from photos"
@@ -183,9 +228,79 @@ export default function SettingsPage() {
         </div>
       </Form>
 
-      <Card title="API key" className="surface-card stack-gap">
+      <Card title="Gemini API keys" className="surface-card stack-gap">
         <Typography.Paragraph type="secondary">
-          Stored only in this browser session. Must match <code>INVENTORY_API_KEY</code> on the server.
+          Used to read product photos. Keys are stored encrypted and are never shown again after
+          saving; only the last four characters are kept for display. If one key is rejected or
+          out of quota, the next one is tried.
+        </Typography.Paragraph>
+        <div className="catalog-list">
+          {gemini.keys.map((entry) => (
+            <div key={entry.key_id} className="catalog-row key-row">
+              <div className="key-row-text">
+                <strong>Key ending in {entry.hint}</strong>
+                <span>
+                  Added {dayjs(entry.created_at).format("D MMM YYYY")}
+                  {entry.last_used_at
+                    ? ` · last used ${dayjs(entry.last_used_at).format("D MMM YYYY, HH:mm")}`
+                    : " · not used yet"}
+                </span>
+                {!entry.readable ? (
+                  <span className="key-row-error">
+                    Cannot be decrypted on this server. Remove it and add the key again.
+                  </span>
+                ) : entry.last_error ? (
+                  <span className="key-row-error">{entry.last_error}</span>
+                ) : null}
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <Button
+                  size="small"
+                  loading={keyBusy === entry.key_id}
+                  disabled={!entry.readable}
+                  onClick={() => void onTestKey(entry.key_id)}
+                >
+                  Test
+                </Button>
+                <Popconfirm
+                  title="Remove this key?"
+                  description="It is deleted from the database and cannot be recovered."
+                  onConfirm={() => void onDeleteKey(entry.key_id)}
+                >
+                  <Button size="small" danger>
+                    Remove
+                  </Button>
+                </Popconfirm>
+              </div>
+            </div>
+          ))}
+          {!gemini.keys.length ? (
+            <p className="import-help">No keys yet. Photo reading is off until you add one.</p>
+          ) : null}
+        </div>
+        <Form
+          form={keyForm}
+          layout="vertical"
+          className="stack-gap"
+          onFinish={(values) => void onAddKey(values)}
+        >
+          <Form.Item
+            name="key"
+            label="API key"
+            rules={[{ required: true, message: "Paste an API key" }]}
+          >
+            <Input.Password autoComplete="off" placeholder="Paste a key from Google AI Studio" />
+          </Form.Item>
+          <Button type="primary" htmlType="submit" loading={keyBusy === "add"}>
+            Check and save key
+          </Button>
+        </Form>
+      </Card>
+
+      <Card title="App access key" className="surface-card stack-gap">
+        <Typography.Paragraph type="secondary">
+          The password for this app itself, if the server has one. Stored only in this browser
+          session; must match <code>KEY</code> on the server.
         </Typography.Paragraph>
         <Form
           layout="vertical"

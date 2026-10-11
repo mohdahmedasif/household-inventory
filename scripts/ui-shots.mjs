@@ -4,7 +4,7 @@ import { chromium } from "playwright";
 
 const BASE = process.env.UI_BASE_URL || "http://127.0.0.1:3030";
 const OUT = path.resolve("tmp/ui-shots");
-const API_KEY = process.env.INVENTORY_API_KEY || "";
+const API_KEY = process.env.KEY || "";
 
 function loadDotEnv() {
   const envPath = path.resolve(".env");
@@ -27,7 +27,7 @@ function loadDotEnv() {
 }
 
 loadDotEnv();
-const key = process.env.INVENTORY_API_KEY || API_KEY;
+const key = process.env.KEY || API_KEY;
 
 fs.mkdirSync(OUT, { recursive: true });
 

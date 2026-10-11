@@ -65,19 +65,23 @@ Then open **http://127.0.0.1:3000**.
 docker compose up --build
 ```
 
-Express serves the Vite bundle from `dist`; SQLite lives in the `household-inventory-data` volume. Host port defaults to 3000; set `INVENTORY_HOST_PORT` to use another one.
+Express serves the Vite bundle from `dist`; SQLite lives in the `household-inventory-data` volume. The port defaults to 3000; set `PORT` to use another one.
 
 ## Configuration
 
 Copy `.env.example` → `.env`.
 
 ```env
-GEMINI_API_KEY=...
-INVENTORY_API_KEY=choose-a-long-random-string
-# INVENTORY_HOST_PORT=3030
+PORT=3030
+KEY=choose-a-long-random-string
 ```
 
-`INVENTORY_API_KEY` protects the REST API and web UI (`Authorization: Bearer …`). If unset, the API is open on that host.
+Those are the only two variables, and both are optional: the port the app is opened on
+(default 3000) and a password for it.
+
+`KEY` protects the REST API and web UI (`Authorization: Bearer …`). If unset, the API is open on that host.
+
+Gemini API keys (for reading product photos) are not set here. Add them under **Settings → Gemini API keys**; they are stored encrypted in the database, and the encryption key lives in `secret.key` in the data directory.
 
 Never commit `.env` — it is gitignored. Do not paste API keys into issues or pull requests.
 

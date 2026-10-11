@@ -19,7 +19,7 @@ export default function App() {
   const [brand, setBrand] = useState({ app_name: "", app_tagline: "" });
 
   // Settings come from the database and must be in place before any page renders.
-  async function start() {
+  async function start(keyJustEntered = false) {
     try {
       applySettings(await fetchSettings());
       setNeedsKey(false);
@@ -27,6 +27,7 @@ export default function App() {
     } catch (err) {
       if (err instanceof AuthError) {
         setNeedsKey(true);
+        if (keyJustEntered) message.error("That key was not accepted. Check it and try again.");
         return;
       }
       message.error(err instanceof Error ? err.message : "Could not reach the API");
@@ -62,14 +63,14 @@ export default function App() {
           </div>
         <Card className="login-card" title="Unlock">
           <Typography.Paragraph type="secondary">
-            This API is protected. Paste the same <code>INVENTORY_API_KEY</code> you set on the
+            This API is protected. Paste the same <code>KEY</code> you set on the
             server.
           </Typography.Paragraph>
           <Form
             layout="vertical"
             onFinish={(values: { key: string }) => {
               setApiKey(values.key.trim());
-              void start();
+              void start(true);
             }}
           >
             <Form.Item

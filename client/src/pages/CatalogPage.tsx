@@ -6,26 +6,77 @@ import {
   fetchCatalog,
   fetchSettings,
   renameCatalogOption,
+  updateSettings,
   type Catalog,
   type CatalogKind,
+  type Settings,
 } from "../api";
-import { applySettings } from "../settings";
+import { applySettings, settings } from "../settings";
 
-const TABS: {
-  key: CatalogKind;
-  label: string;
-  singular: string;
-  listKey: keyof Pick<Catalog, "categories" | "locations" | "package_types">;
-}[] = [
-  { key: "category", label: "Categories", singular: "category", listKey: "categories" },
-  { key: "location", label: "Locations", singular: "location", listKey: "locations" },
-  { key: "package_type", label: "Package types", singular: "package type", listKey: "package_types" },
+type ListSetting = "lowercase_units" | "blank_words";
+type CatalogList = keyof Pick<Catalog, "categories" | "locations" | "package_types" | "size_units">;
+
+// Catalog lists are the options offered in dropdowns; text rules are word lists
+// applied when something is saved. Both are edited the same way here.
+type Tab = { key: string; label: string; singular: string; help: string } & (
+  | { kind: CatalogKind; listKey: CatalogList }
+  | { setting: ListSetting }
+);
+
+const TABS: Tab[] = [
+  {
+    key: "category",
+    kind: "category",
+    listKey: "categories",
+    label: "Categories",
+    singular: "category",
+    help: "The groups products are filed under.",
+  },
+  {
+    key: "location",
+    kind: "location",
+    listKey: "locations",
+    label: "Locations",
+    singular: "location",
+    help: "The places in your home where things are kept.",
+  },
+  {
+    key: "package_type",
+    kind: "package_type",
+    listKey: "package_types",
+    label: "Package types",
+    singular: "package type",
+    help: "How a purchase is packaged.",
+  },
+  {
+    key: "size_unit",
+    kind: "size_unit",
+    listKey: "size_units",
+    label: "Units",
+    singular: "unit",
+    help: "The units offered next to Size on a purchase.",
+  },
+  {
+    key: "lowercase_units",
+    setting: "lowercase_units",
+    label: "Lowercase words",
+    singular: "word",
+    help: "Names are capitalized word by word, except these: “Rice 500 g” keeps its small “g”.",
+  },
+  {
+    key: "blank_words",
+    setting: "blank_words",
+    label: "Empty words",
+    singular: "word",
+    help: "A field containing only one of these is saved as blank, so “n/a” or “unknown” never ends up as a company or a note.",
+  },
 ];
 
 export default function CatalogPage() {
   const { message } = AntdApp.useApp();
   const [catalog, setCatalog] = useState<Catalog | null>(null);
-  const [kind, setKind] = useState<CatalogKind>("category");
+  const [prefs, setPrefs] = useState<Settings>(settings());
+  const [tabKey, setTabKey] = useState(TABS[0].key);
   const [draft, setDraft] = useState("");
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -43,22 +94,40 @@ export default function CatalogPage() {
     void load();
   }, []);
 
-  const tab = TABS.find((entry) => entry.key === kind)!;
-  const options = catalog?.[tab.listKey] ?? [];
+  const tab = TABS.find((entry) => entry.key === tabKey)!;
+  const isSetting = "setting" in tab;
+  const options = "setting" in tab ? prefs[tab.setting] : (catalog?.[tab.listKey] ?? []);
+
+  async function saveWords(key: ListSetting, words: string[]) {
+    const next = await updateSettings({ [key]: words });
+    applySettings(next);
+    setPrefs(next);
+  }
+
+  async function run(action: () => Promise<void>, done: string, failed: string) {
+    setBusy(true);
+    try {
+      await action();
+      message.success(done);
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : failed);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function onAdd() {
     const name = draft.trim();
     if (!name) return;
-    setBusy(true);
-    try {
-      setCatalog(await addCatalogOption(kind, name));
-      setDraft("");
-      message.success("Added");
-    } catch (err) {
-      message.error(err instanceof Error ? err.message : "Add failed");
-    } finally {
-      setBusy(false);
-    }
+    await run(
+      async () => {
+        if ("setting" in tab) await saveWords(tab.setting, [...prefs[tab.setting], name]);
+        else setCatalog(await addCatalogOption(tab.kind, name));
+        setDraft("");
+      },
+      "Added",
+      "Add failed",
+    );
   }
 
   async function onRename(from: string) {
@@ -67,47 +136,61 @@ export default function CatalogPage() {
       setRenaming(null);
       return;
     }
-    setBusy(true);
-    try {
-      setCatalog(await renameCatalogOption(kind, from, to));
-      // A renamed option may have been one of the defaults.
-      applySettings(await fetchSettings());
-      setRenaming(null);
-      message.success("Renamed");
-    } catch (err) {
-      message.error(err instanceof Error ? err.message : "Rename failed");
-    } finally {
-      setBusy(false);
-    }
+    await run(
+      async () => {
+        if ("setting" in tab) {
+          await saveWords(
+            tab.setting,
+            prefs[tab.setting].map((word) => (word === from ? to : word)),
+          );
+        } else {
+          setCatalog(await renameCatalogOption(tab.kind, from, to));
+          // A renamed option may have been one of the defaults.
+          const next = await fetchSettings();
+          applySettings(next);
+          setPrefs(next);
+        }
+        setRenaming(null);
+      },
+      "Renamed",
+      "Rename failed",
+    );
   }
 
   async function onDelete(name: string) {
-    setBusy(true);
-    try {
-      setCatalog(await deleteCatalogOption(kind, name));
-      message.success("Deleted");
-    } catch (err) {
-      message.error(err instanceof Error ? err.message : "Delete failed");
-    } finally {
-      setBusy(false);
-    }
+    await run(
+      async () => {
+        if ("setting" in tab) {
+          await saveWords(
+            tab.setting,
+            prefs[tab.setting].filter((word) => word !== name),
+          );
+        } else {
+          setCatalog(await deleteCatalogOption(tab.kind, name));
+        }
+      },
+      "Deleted",
+      "Delete failed",
+    );
   }
 
   return (
     <>
       <p className="page-subheading">
-        Shared lists for the web UI. Renaming updates every product or batch that uses that value.
+        The lists the app works from. Renaming an option updates every product or purchase that
+        uses it.
       </p>
       <div className="surface-card" style={{ padding: 20 }}>
         <Tabs
-          activeKey={kind}
+          activeKey={tabKey}
           onChange={(key) => {
-            setKind(key as CatalogKind);
+            setTabKey(key);
             setRenaming(null);
             setDraft("");
           }}
           items={TABS.map((entry) => ({ key: entry.key, label: entry.label }))}
         />
+        <p className="import-help">{tab.help}</p>
         <div className="page-toolbar flat">
           <Input
             size="large"
@@ -158,7 +241,11 @@ export default function CatalogPage() {
                     </Button>
                     <Popconfirm
                       title={`Delete "${name}"?`}
-                      description="Blocked if any item still uses it."
+                      description={
+                        isSetting
+                          ? "The rule stops applying to this word from now on."
+                          : "Blocked if any item still uses it."
+                      }
                       onConfirm={() => void onDelete(name)}
                     >
                       <Button size="small" danger>
@@ -170,7 +257,7 @@ export default function CatalogPage() {
               </div>
             </div>
           ))}
-          {!options.length ? <p className="import-help">No options yet.</p> : null}
+          {!options.length ? <p className="import-help">Nothing in this list yet.</p> : null}
         </div>
       </div>
     </>

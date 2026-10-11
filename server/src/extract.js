@@ -5,7 +5,7 @@ import { blankIfPlaceholder } from "./validate.js";
 
 // The lists, defaults and language all come from the database, so the prompt
 // never names a particular category, location, package type or brand.
-function buildInstruction(categories, locations, packageTypes, settings) {
+function buildInstruction(categories, locations, packageTypes, sizeUnits, settings) {
   return [
     "Extract one household inventory item (food, drink, medicine, supplement or household supply) into a JSON object with keys: name, brand, category, location, package_type, package_count, units_per_package, size_value, size_unit, expiry_date, notes.",
     `name MUST be a real, concrete product name in ${settings.extract_language} (translate from the label or the user's text if needed). Use the product name printed on the label; if only a generic name or active ingredient is known, use that. Never use a placeholder.`,
@@ -15,13 +15,14 @@ function buildInstruction(categories, locations, packageTypes, settings) {
     `package_type MUST be exactly one of the allowed package types. Pick the one that best describes the packaging; if unsure, use "${settings.default_package_type}".`,
     "package_count = number of packages on hand (integer, 1 if not stated).",
     "units_per_package = pieces per package if known (for example tablets per strip); otherwise leave blank.",
-    "size_value/size_unit = the strength or size split into a plain number and its unit (for example '20 mg' -> size_value 20, size_unit mg); leave both blank if unknown.",
+    "size_value/size_unit = the strength or size split into a plain number and its unit; size_unit MUST be one of the allowed units, converting if the label uses another spelling; leave both blank if unknown.",
     "notes: for a medicine or supplement, briefly say what it is used for, inferring from the product if the label does not say; for anything else leave blank unless there is something notable to record.",
     "expiry_date: convert to YYYY-MM-DD if provided, otherwise leave blank.",
     "Use an empty string for any unknown optional field.",
     `Allowed categories: ${categories.join(", ")}.`,
     `Allowed locations: ${locations.join(", ")}.`,
     `Allowed package types: ${packageTypes.join(", ")}.`,
+    `Allowed units: ${sizeUnits.join(", ")}.`,
   ].join("\n");
 }
 
@@ -45,7 +46,7 @@ function coerceExpiry(value, blankWords) {
   return new Date(parsed).toISOString().slice(0, 10);
 }
 
-function buildSchema(categories, locations, packageTypes) {
+function buildSchema(categories, locations, packageTypes, sizeUnits) {
   return {
     type: "object",
     properties: {
@@ -57,7 +58,7 @@ function buildSchema(categories, locations, packageTypes) {
       package_count: { type: "integer" },
       units_per_package: { type: "string" },
       size_value: { type: "string" },
-      size_unit: { type: "string" },
+      size_unit: { type: "string", enum: [...sizeUnits, ""] },
       expiry_date: { type: "string" },
       notes: { type: "string" },
     },
@@ -99,7 +100,10 @@ function normalizeDraft(raw, catalog, settings) {
     package_count: Math.max(0, Math.trunc(packageCount)),
     units_per_package: unitsMatch ? unitsMatch[0] : units,
     size_value: blank(raw?.size_value),
-    size_unit: blank(raw?.size_unit),
+    size_unit:
+      (catalog.size_units || []).find(
+        (unit) => unit.toLowerCase() === blank(raw?.size_unit).toLowerCase(),
+      ) ?? "",
     expiry_date: coerceExpiry(raw?.expiry_date, settings.blank_words),
     notes: sentenceCase(blank(raw?.notes)),
     batch_notes: "",
@@ -114,9 +118,7 @@ function isOverloaded(err) {
 
 // Gemini sheds load with 503/429 during demand spikes: retry the primary
 // model briefly, then try the fallback model once before giving up.
-async function generateWithRetry(ai, request) {
-  const primary = config.geminiModel;
-  const fallback = config.geminiFallbackModel;
+async function generateWithRetry(ai, request, primary, fallback) {
   const delays = config.geminiRetryDelaysMs;
   let lastError;
   for (let attempt = 0; attempt <= delays.length; attempt += 1) {
@@ -134,18 +136,61 @@ async function generateWithRetry(ai, request) {
   return ai.models.generateContent({ ...request, model: fallback });
 }
 
+// A key Google rejects or has rate-limited; the next key is worth trying.
+function isKeyProblem(err) {
+  const status = Number(err?.status);
+  if (status === 401 || status === 403 || status === 429) return true;
+  return /API_KEY_INVALID|API key not valid|PERMISSION_DENIED|RESOURCE_EXHAUSTED|quota/i.test(
+    String(err?.message || ""),
+  );
+}
+
+/** Ask Google whether a key works. Resolves to "" when it does, or a short reason. */
+export async function checkGeminiKey(key) {
+  try {
+    const res = await fetch(`${config.geminiApiBase}/models?pageSize=1`, {
+      headers: { "x-goog-api-key": key },
+    });
+    if (res.ok) return "";
+    const body = await res.json().catch(() => null);
+    return body?.error?.message || `Google answered ${res.status}.`;
+  } catch (err) {
+    return `Could not reach Google: ${err?.message || "network error"}`;
+  }
+}
+
+/** Models this key can use for reading photos, as [{ name, label }]. */
+export async function listGeminiModels(key) {
+  const res = await fetch(`${config.geminiApiBase}/models?pageSize=1000`, {
+    headers: { "x-goog-api-key": key },
+  });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(body?.error?.message || `Google answered ${res.status}.`);
+  return (body?.models ?? [])
+    .filter((model) => (model.supportedGenerationMethods ?? []).includes("generateContent"))
+    .map((model) => ({
+      name: String(model.name ?? "").replace(/^models\//, ""),
+      label: model.displayName || "",
+    }))
+    .filter((model) => model.name)
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * `apiKeys` is tried in order: [{ key, key_id }]. `onKeyResult(key_id, error)`
+ * is told how each saved key did.
+ */
 export async function extractItem({
   imageBuffer,
   mimeType = "image/jpeg",
   caption = "",
   catalog,
   settings,
+  apiKeys = [],
+  onKeyResult = () => {},
 }) {
-  const apiKey = config.geminiApiKey;
-  if (!apiKey) {
-    const err = new Error(
-      "Gemini is not configured. Set GEMINI_API_KEY (or INVENTORY_GEMINI_API_KEY) on the server.",
-    );
+  if (!apiKeys.length) {
+    const err = new Error("Gemini is not configured. Add an API key in Settings.");
     err.status = 503;
     throw err;
   }
@@ -158,6 +203,7 @@ export async function extractItem({
   const categories = catalog.categories || [];
   const locations = catalog.locations || [];
   const packageTypes = catalog.package_types || [];
+  const sizeUnits = catalog.size_units || [];
   if (!categories.length || !locations.length || !packageTypes.length) {
     const err = new Error("Catalog is empty; add categories, locations, and package types first.");
     err.status = 400;
@@ -169,7 +215,6 @@ export async function extractItem({
   if (captionText) promptBits.push(`User text/caption:\n${captionText}`);
   else promptBits.push("No caption was provided; infer details from the image/label.");
 
-  const ai = new GoogleGenAI({ apiKey });
   const request = {
     contents: [
       {
@@ -186,19 +231,34 @@ export async function extractItem({
       },
     ],
     config: {
-      systemInstruction: buildInstruction(categories, locations, packageTypes, settings),
+      systemInstruction: buildInstruction(categories, locations, packageTypes, sizeUnits, settings),
       responseMimeType: "application/json",
-      responseJsonSchema: buildSchema(categories, locations, packageTypes),
+      responseJsonSchema: buildSchema(categories, locations, packageTypes, sizeUnits),
       temperature: config.geminiTemperature,
     },
   };
   let response;
-  try {
-    response = await generateWithRetry(ai, request);
-  } catch (cause) {
-    const err = new Error(cause?.message || "Gemini request failed.");
+  let failure;
+  for (const entry of apiKeys) {
+    try {
+      response = await generateWithRetry(
+        new GoogleGenAI({ apiKey: entry.key }),
+        request,
+        settings.gemini_model,
+        settings.gemini_fallback_model,
+      );
+      if (entry.key_id) onKeyResult(entry.key_id, "");
+      break;
+    } catch (cause) {
+      failure = cause;
+      if (entry.key_id) onKeyResult(entry.key_id, cause?.message || "Request failed");
+      if (!isKeyProblem(cause)) break;
+    }
+  }
+  if (!response) {
+    const err = new Error(failure?.message || "Gemini request failed.");
     err.status = 502;
-    err.cause = cause;
+    err.cause = failure;
     throw err;
   }
 

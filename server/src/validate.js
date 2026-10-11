@@ -108,7 +108,11 @@ export function normalizeBatch(db, raw = {}, { partial = false } = {}) {
   take("package_count", (v) => coercePackageCount(v, partial ? 0 : 1));
   take("units_per_package", blank);
   take("size_value", blank);
-  take("size_unit", blank);
+  // A unit matching the Units list takes that list's spelling; anything else is kept as typed.
+  take("size_unit", (v) => {
+    const text = blank(v);
+    return catalog.size_units.find((unit) => unit.toLowerCase() === text.toLowerCase()) ?? text;
+  });
   take("expiry_date", (v) => coerceDate(v));
   take("notes", (v) => sentenceCase(blank(v)));
   if (!partial || source.acquired_on !== undefined || source.last_updated !== undefined) {

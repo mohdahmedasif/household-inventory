@@ -3,6 +3,7 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import { DEFAULT_SEEDS, SETTINGS_SCHEMA, coerceSetting, sentenceCase, titleCase } from "./catalog.js";
 import { config } from "./config.js";
+import { decryptSecret, encryptSecret } from "./secrets.js";
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS products (
@@ -61,6 +62,17 @@ CREATE TABLE IF NOT EXISTS stock_events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_stock_events_product_id ON stock_events(product_id);
+
+-- Gemini API keys added on the Settings page. The key itself is stored
+-- encrypted (see secrets.js); hint is its last four characters, for display.
+CREATE TABLE IF NOT EXISTS gemini_keys (
+  key_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ciphertext TEXT NOT NULL,
+  hint TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  last_used_at TEXT NOT NULL DEFAULT '',
+  last_error TEXT NOT NULL DEFAULT ''
+);
 CREATE INDEX IF NOT EXISTS idx_products_name_key_category
   ON products(name_key, category);
 CREATE INDEX IF NOT EXISTS idx_batches_product_id ON batches(product_id);
@@ -107,6 +119,55 @@ function capitalizeNames(db) {
     }
   });
   fix();
+}
+
+// ---------- Gemini API keys ----------
+
+const dataDirOf = (db) => path.dirname(db.name);
+
+/** Keys for display: never the key itself, only its last four characters. */
+export function listGeminiKeys(db) {
+  return db
+    .prepare(
+      `SELECT key_id, hint, created_at, last_used_at, last_error, ciphertext
+       FROM gemini_keys ORDER BY key_id ASC`,
+    )
+    .all()
+    .map(({ ciphertext, ...row }) => ({
+      ...row,
+      readable: decryptSecret(dataDirOf(db), ciphertext) !== null,
+    }));
+}
+
+export function addGeminiKey(db, key) {
+  const info = db
+    .prepare("INSERT INTO gemini_keys (ciphertext, hint, created_at) VALUES (?, ?, ?)")
+    .run(encryptSecret(dataDirOf(db), key), key.slice(-4), new Date().toISOString());
+  return Number(info.lastInsertRowid);
+}
+
+export function deleteGeminiKey(db, keyId) {
+  return db.prepare("DELETE FROM gemini_keys WHERE key_id = ?").run(keyId).changes > 0;
+}
+
+/** Decrypted keys, in the order they were added, for the server's own use. */
+export function readGeminiKeys(db) {
+  return db
+    .prepare("SELECT key_id, ciphertext FROM gemini_keys ORDER BY key_id ASC")
+    .all()
+    .map((row) => ({
+      key_id: row.key_id,
+      key: decryptSecret(dataDirOf(db), row.ciphertext),
+    }))
+    .filter((row) => row.key);
+}
+
+export function noteGeminiKeyResult(db, keyId, error = "") {
+  db.prepare("UPDATE gemini_keys SET last_used_at = ?, last_error = ? WHERE key_id = ?").run(
+    new Date().toISOString(),
+    String(error).slice(0, 200),
+    keyId,
+  );
 }
 
 // ---------- Full backup ----------
@@ -177,10 +238,11 @@ export function restoreBackup(db, backup) {
       }
       counts[table] = tables[table].length;
     }
-    // Settings added since the backup was made get their starting values.
+    // Settings and lists added since the backup was made get their starting values.
     seedSettings(db);
   });
   restore();
+  seedCatalog(db);
   return counts;
 }
 
@@ -317,15 +379,31 @@ function migrateFromItems(db) {
   db.exec("DROP TABLE IF EXISTS items");
 }
 
+// Each kind is seeded once (tracked in meta), so a kind added in a later version
+// reaches existing databases and a list the user emptied stays empty.
 function seedCatalog(db) {
-  const count = db.prepare("SELECT COUNT(*) AS n FROM catalog_options").get();
-  if ((count?.n ?? 0) > 0) return;
   const insert = db.prepare(
-    "INSERT INTO catalog_options (kind, name, sort_order) VALUES (?, ?, ?)",
+    "INSERT OR IGNORE INTO catalog_options (kind, name, sort_order) VALUES (?, ?, ?)",
   );
+  const countKind = db.prepare("SELECT COUNT(*) AS n FROM catalog_options WHERE kind = ?");
   const seed = db.transaction(() => {
     for (const [kind, names] of Object.entries(DEFAULT_SEEDS)) {
-      names.forEach((name, index) => insert.run(kind, name, index));
+      const flag = `catalog_seeded_${kind}`;
+      if (getMeta(db, flag)) continue;
+      if ((countKind.get(kind)?.n ?? 0) === 0) {
+        // Units already typed on purchases join the list, so none is left without an option.
+        const inUse =
+          kind === "size_unit"
+            ? db
+                .prepare("SELECT DISTINCT trim(size_unit) AS name FROM batches WHERE trim(size_unit) <> ''")
+                .all()
+                .map((row) => row.name)
+            : [];
+        const known = new Set(names.map((name) => name.toLowerCase()));
+        const extra = inUse.filter((name) => !known.has(name.toLowerCase()));
+        [...names, ...extra].forEach((name, index) => insert.run(kind, name, index));
+      }
+      setMeta(db, flag, "1");
     }
   });
   seed();
@@ -389,6 +467,7 @@ export function getCatalog(db) {
     categories: listCatalogNames(db, "category"),
     locations: listCatalogNames(db, "location"),
     package_types: listCatalogNames(db, "package_type"),
+    size_units: listCatalogNames(db, "size_unit"),
     defaults: {
       category: settings.default_category,
       location: settings.default_location,

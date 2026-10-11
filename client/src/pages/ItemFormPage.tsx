@@ -3,8 +3,10 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
   App as AntdApp,
+  AutoComplete,
   Button,
   Card,
+  Collapse,
   DatePicker,
   Form,
   Input,
@@ -35,11 +37,13 @@ import type { Dayjs } from "dayjs";
 import type { ColumnsType } from "antd/es/table";
 import {
   addBatch,
+  adjustBatchCount,
   createProduct,
   deleteBatch,
   deleteProduct,
   extractFromImage,
   fetchCatalog,
+  fetchCompanies,
   fetchProduct,
   fetchProductEvents,
   fetchProducts,
@@ -120,6 +124,8 @@ export default function ItemFormPage() {
   const [photoCaption, setPhotoCaption] = useState("");
   const [extracting, setExtracting] = useState(false);
   const [events, setEvents] = useState<StockEvent[]>([]);
+  const [companies, setCompanies] = useState<string[]>([]);
+  const [moreOpen, setMoreOpen] = useState(false);
   const addAnother = useRef(false);
   usePageTitle(editing ? product?.name : undefined);
 
@@ -155,6 +161,7 @@ export default function ItemFormPage() {
         expiry: item.expiry_date ? dayjs(item.expiry_date) : null,
       });
       lookupSimilar(item.name ?? "", item.category ?? "");
+      setMoreOpen(Boolean(item.units_per_package || item.batch_notes));
       message.success("Details filled from photo — review and save");
     } catch (err) {
       message.error(err instanceof Error ? err.message : "Could not read that photo");
@@ -223,6 +230,9 @@ export default function ItemFormPage() {
         const cat = await fetchCatalog();
         if (cancelled) return;
         setCatalog(cat);
+        fetchCompanies()
+          .then(({ companies: rows }) => setCompanies(rows.map((row) => row.name)))
+          .catch(() => setCompanies([]));
         if (editing && productId) {
           await reload(productId);
         } else {
@@ -265,6 +275,7 @@ export default function ItemFormPage() {
     clearPhoto();
     setPhotoCaption("");
     setSimilar([]);
+    setMoreOpen(false);
     newForm.resetFields();
     newForm.setFieldsValue(emptyProductInput());
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -323,6 +334,7 @@ export default function ItemFormPage() {
       expiry: null,
       acquired: dayjs(),
     });
+    setMoreOpen(false);
     setBatchModalOpen(true);
   }
 
@@ -341,6 +353,7 @@ export default function ItemFormPage() {
       expiry: batch.expiry_date ? dayjs(batch.expiry_date) : null,
       acquired: dayjs(),
     });
+    setMoreOpen(Boolean(batch.units_per_package || batch.notes));
     setBatchModalOpen(true);
   }
 
@@ -358,6 +371,7 @@ export default function ItemFormPage() {
       expiry: batch.expiry_date ? dayjs(batch.expiry_date) : null,
       acquired: batch.acquired_on ? dayjs(batch.acquired_on) : null,
     });
+    setMoreOpen(Boolean(batch.units_per_package || batch.notes));
     setBatchModalOpen(true);
   }
 
@@ -393,6 +407,16 @@ export default function ItemFormPage() {
     }
   }
 
+  async function onCount(batch: Batch, delta: number) {
+    if (!productId) return;
+    try {
+      await adjustBatchCount(batch.batch_id, delta);
+      await reload(productId);
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : "Count update failed");
+    }
+  }
+
   async function onSaveNote(batch: Batch, next: string) {
     if (!productId) return;
     const notes = next.trim();
@@ -420,6 +444,30 @@ export default function ItemFormPage() {
     }
   }
 
+  const optionsOf = (values: string[] | undefined) =>
+    (values ?? []).map((value) => ({ value, label: value }));
+  const companyOptions = companies.map((value) => ({ value }));
+  const matchesTyped = (input: string, option?: { value: string }) =>
+    String(option?.value ?? "").toLowerCase().includes(input.toLowerCase());
+
+  // Size is one control: the number, with its unit picked from the Units list.
+  const sizeField = (large: boolean) => (
+    <Space.Compact block>
+      <Form.Item name="size_value" noStyle>
+        <Input size={large ? "large" : undefined} placeholder="e.g. 500" inputMode="decimal" />
+      </Form.Item>
+      <Form.Item name="size_unit" noStyle>
+        <Select
+          size={large ? "large" : undefined}
+          allowClear
+          placeholder="Unit"
+          options={optionsOf(catalog?.size_units)}
+          style={{ width: 110, flex: "none" }}
+        />
+      </Form.Item>
+    </Space.Compact>
+  );
+
   const batchColumns: ColumnsType<Batch> = [
     {
       title: "#",
@@ -436,17 +484,38 @@ export default function ItemFormPage() {
     {
       title: "Package",
       render: (_: unknown, row) => (
-        <span>
-          {row.package_type}
-          {sizeLabel(row) ? ` · ${sizeLabel(row)}` : ""}
+        <span className="batch-package">
+          <span>{row.package_type}</span>
+          {sizeLabel(row) ? <small>{sizeLabel(row)}</small> : null}
         </span>
       ),
     },
     {
       title: "Count",
       dataIndex: "package_count",
-      width: 90,
-      render: (count: number) => <strong>{count}</strong>,
+      width: 140,
+      render: (count: number, row) => (
+        <span className="batch-stepper">
+          <Button
+            size="small"
+            shape="circle"
+            disabled={count <= 0}
+            onClick={() => void onCount(row, -1)}
+            aria-label="Use one from this purchase"
+          >
+            −
+          </Button>
+          <span>{count}</span>
+          <Button
+            size="small"
+            shape="circle"
+            onClick={() => void onCount(row, 1)}
+            aria-label="Add one to this purchase"
+          >
+            +
+          </Button>
+        </span>
+      ),
     },
     {
       title: "Note",
@@ -646,7 +715,13 @@ export default function ItemFormPage() {
                     <Input size="large" placeholder="e.g. Chickpeas" />
                   </Form.Item>
                   <Form.Item name="company" label="Company / brand" className="form-field-wide">
-                    <Input size="large" placeholder="e.g. Freshona" />
+                    <AutoComplete
+                      size="large"
+                      options={companyOptions}
+                      filterOption={matchesTyped}
+                      placeholder="Optional"
+                      allowClear
+                    />
                   </Form.Item>
                 </div>
                 {similar.some((p) => p.exact) ? (
@@ -728,27 +803,46 @@ export default function ItemFormPage() {
                   </Form.Item>
                 </div>
                 <div className="form-row">
-                  <Form.Item name="units_per_package" label="Units / pack" className="form-field-narrow">
-                    <Input size="large" placeholder="10" />
-                  </Form.Item>
-                  <Form.Item name="size_value" label="Size" className="form-field-narrow">
-                    <Input size="large" placeholder="500" />
-                  </Form.Item>
-                  <Form.Item name="size_unit" label="Unit" className="form-field-narrow">
-                    <Input size="large" placeholder="g" />
-                  </Form.Item>
-                  <Form.Item
-                    name="batch_notes"
-                    label="Batch note"
-                    className="form-field-wide"
-                    tooltip="What makes this batch different, e.g. sliced, baked, chopped."
-                  >
-                    <Input size="large" placeholder="Optional, e.g. Sliced" allowClear />
+                  <Form.Item label="Size" className="form-field-wide">
+                    {sizeField(true)}
                   </Form.Item>
                   <Form.Item name="expiry" label="Expiry" className="form-field-wide">
                     <DatePicker size="large" style={{ width: "100%" }} />
                   </Form.Item>
                 </div>
+                <Collapse
+                  ghost
+                  className="more-fields"
+                  activeKey={moreOpen ? ["more"] : []}
+                  onChange={(keys) => setMoreOpen(keys.length > 0)}
+                  items={[
+                    {
+                      key: "more",
+                      label: "More details",
+                      forceRender: true,
+                      children: (
+                        <div className="form-row">
+                          <Form.Item
+                            name="units_per_package"
+                            label="Units per pack"
+                            className="form-field-narrow"
+                            tooltip="Pieces inside one package, e.g. tablets per strip."
+                          >
+                            <Input size="large" inputMode="numeric" />
+                          </Form.Item>
+                          <Form.Item
+                            name="batch_notes"
+                            label="Batch note"
+                            className="form-field-wide"
+                            tooltip="What makes this batch different, e.g. sliced, baked, chopped."
+                          >
+                            <Input size="large" placeholder="Optional, e.g. Sliced" allowClear />
+                          </Form.Item>
+                        </div>
+                      ),
+                    },
+                  ]}
+                />
               </div>
             </div>
           </Card>
@@ -945,51 +1039,69 @@ export default function ItemFormPage() {
           onFinish={(values) => void onSaveBatch(values)}
         >
           <Form.Item name="company" label="Company / brand">
-            <Input />
-          </Form.Item>
-          <Form.Item name="location" label="Location">
-            <Select
-              options={(catalog?.locations ?? []).map((value) => ({
-                value,
-                label: value,
-              }))}
+            <AutoComplete
+              options={companyOptions}
+              filterOption={matchesTyped}
+              placeholder="Optional"
+              allowClear
             />
           </Form.Item>
-          <Form.Item name="package_type" label="Package type">
-            <Select
-              options={(catalog?.package_types ?? []).map((value) => ({
-                value,
-                label: value,
-              }))}
-            />
-          </Form.Item>
-          <Space wrap size="large" className="form-row">
-            <Form.Item name="package_count" label="Count">
-              <InputNumber min={0} />
+          <div className="form-row">
+            <Form.Item name="location" label="Location" className="form-field-half">
+              <Select options={optionsOf(catalog?.locations)} />
             </Form.Item>
-            <Form.Item name="units_per_package" label="Units / pack">
-              <Input />
+            <Form.Item name="package_type" label="Package" className="form-field-half">
+              <Select options={optionsOf(catalog?.package_types)} />
             </Form.Item>
-            <Form.Item name="size_value" label="Size">
-              <Input />
+          </div>
+          <div className="form-row">
+            <Form.Item name="package_count" label="Count" className="form-field-count">
+              <InputNumber min={0} style={{ width: "100%" }} />
             </Form.Item>
-            <Form.Item name="size_unit" label="Unit">
-              <Input />
+            <Form.Item label="Size" className="form-field-half">
+              {sizeField(false)}
             </Form.Item>
-          </Space>
-          <Form.Item
-            name="notes"
-            label="Note for this batch"
-            tooltip="What makes this batch different, e.g. sliced, baked, chopped."
-          >
-            <Input placeholder="Optional, e.g. Sliced" allowClear />
-          </Form.Item>
+          </div>
           <Form.Item name="expiry" label="Expiry">
-            <DatePicker />
+            <DatePicker style={{ width: "100%" }} />
           </Form.Item>
-          <Form.Item name="acquired" label="Acquired">
-            <DatePicker />
-          </Form.Item>
+          <Collapse
+            ghost
+            className="more-fields"
+            activeKey={moreOpen ? ["more"] : []}
+            onChange={(keys) => setMoreOpen(keys.length > 0)}
+            items={[
+              {
+                key: "more",
+                label: "More details",
+                forceRender: true,
+                children: (
+                  <>
+                    <div className="form-row">
+                      <Form.Item
+                        name="units_per_package"
+                        label="Units per pack"
+                        className="form-field-half"
+                        tooltip="Pieces inside one package, e.g. tablets per strip."
+                      >
+                        <Input inputMode="numeric" />
+                      </Form.Item>
+                      <Form.Item name="acquired" label="Acquired" className="form-field-half">
+                        <DatePicker style={{ width: "100%" }} />
+                      </Form.Item>
+                    </div>
+                    <Form.Item
+                      name="notes"
+                      label="Note for this batch"
+                      tooltip="What makes this batch different, e.g. sliced, baked, chopped."
+                    >
+                      <Input placeholder="Optional, e.g. Sliced" allowClear />
+                    </Form.Item>
+                  </>
+                ),
+              },
+            ]}
+          />
           <Space>
             <Button type="primary" htmlType="submit" loading={batchBusy}>
               Save

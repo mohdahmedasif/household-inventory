@@ -9,11 +9,13 @@ import { createRouter } from "./routes.js";
 loadDotEnv();
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const PORT = Number(process.env.INVENTORY_API_PORT || process.env.PORT || 3000);
-const HOST = process.env.INVENTORY_API_HOST || "0.0.0.0";
-const DATA_DIR = process.env.INVENTORY_DATA_DIR || path.join(ROOT, "..", "data");
-const DIST_DIR = process.env.INVENTORY_DIST_DIR || path.join(ROOT, "dist");
-const API_KEY = (process.env.INVENTORY_API_KEY || "").trim();
+const PORT = Number(process.env.PORT) || 3000;
+// Every interface, so phones on the same network can reach it.
+const HOST = "0.0.0.0";
+// A "data" folder beside the server: <repo>/data normally, /data in the Docker image.
+const DATA_DIR = path.join(ROOT, "..", "data");
+const DIST_DIR = path.join(ROOT, "dist");
+const API_KEY = (process.env.KEY || "").trim();
 
 const db = createDb(path.join(DATA_DIR, "inventory.sqlite"));
 const app = express();
@@ -59,6 +61,6 @@ app.listen(PORT, HOST, () => {
   console.log(`Inventory API listening on http://${HOST}:${PORT}`);
   console.log(`SQLite: ${path.join(DATA_DIR, "inventory.sqlite")}`);
   if (!API_KEY) {
-    console.warn("INVENTORY_API_KEY is not set — the API is open on this host.");
+    console.warn("KEY is not set — the API is open on this host.");
   }
 });

@@ -7,7 +7,7 @@
  *   node scripts/import-sheet-csv.mjs [path/to/inventory-export.csv]
  *
  * Default CSV path: data/inventory-export.csv
- * Default DB path:  data/inventory.sqlite (or INVENTORY_DATA_DIR)
+ * Database:         data/inventory.sqlite
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -31,7 +31,7 @@ import { coerceDate, normalizeSheetRow, parseId } from "../server/src/validate.j
 loadDotEnv();
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const DATA_DIR = process.env.INVENTORY_DATA_DIR || path.join(ROOT, "data");
+const DATA_DIR = path.join(ROOT, "data");
 const csvPath = path.resolve(
   process.argv[2] || path.join(DATA_DIR, "inventory-export.csv"),
 );

@@ -14,8 +14,5 @@ RUN npm install --omit=dev
 COPY server/src ./src
 COPY --from=client /src/client/dist ./dist
 ENV NODE_ENV=production
-ENV INVENTORY_DATA_DIR=/data
-ENV INVENTORY_API_HOST=0.0.0.0
-ENV INVENTORY_API_PORT=3000
 EXPOSE 3000
 CMD ["node", "src/index.js"]

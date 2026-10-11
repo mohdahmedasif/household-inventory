@@ -6,19 +6,15 @@ services:
     image: household-inventory:latest
     container_name: household-inventory-app
     ports:
-      - "${INVENTORY_HOST_PORT:-3000}:3000"
+      - "${PORT:-3000}:3000"
     env_file:
       - path: .env
         required: false
     environment:
       NODE_ENV: production
-      INVENTORY_DATA_DIR: /data
-      INVENTORY_API_HOST: 0.0.0.0
-      INVENTORY_API_PORT: "3000"
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      INVENTORY_GEMINI_API_KEY: ${INVENTORY_GEMINI_API_KEY:-}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-flash-latest}
-      GEMINI_FALLBACK_MODEL: ${GEMINI_FALLBACK_MODEL:-gemini-flash-lite-latest}
+      # Inside the container the app always listens on 3000; PORT from
+      # .env only chooses the port published on the host (see "ports" above).
+      PORT: "3000"
     volumes:
       - inventory-data:/data
     restart: unless-stopped

@@ -4,7 +4,7 @@ Household Inventory stores a Gemini API key (optional) and an inventory API key 
 
 ## Do not file in public issues
 
-- Gemini keys or `INVENTORY_API_KEY`
+- Gemini keys or `KEY`
 - Photos or rows from a real inventory
 - `.env` contents or deploy SSH keys
 

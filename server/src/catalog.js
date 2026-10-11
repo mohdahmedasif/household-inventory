@@ -27,10 +27,13 @@ export const PACKAGE_TYPES = [
   "Loose",
 ];
 
+export const SIZE_UNITS = ["g", "kg", "mg", "ml", "l", "pcs"];
+
 export const CATALOG_KINDS = {
   category: "category",
   location: "location",
   package_type: "package_type",
+  size_unit: "size_unit",
 };
 
 export const KIND_TO_ITEM_FIELD = {
@@ -43,6 +46,7 @@ export const DEFAULT_SEEDS = {
   category: CATEGORIES,
   location: STORAGE_LOCATIONS,
   package_type: PACKAGE_TYPES,
+  size_unit: SIZE_UNITS,
 };
 
 // Every setting the app reads, with the value a brand-new database starts with.
@@ -65,6 +69,8 @@ export const SETTINGS_SCHEMA = {
     initial: ["n/a", "na", "n.a.", "none", "null", "unknown", "skip", "-", "—", "no"],
   },
   extract_language: { type: "text", initial: "English" },
+  gemini_model: { type: "text", initial: "gemini-flash-latest" },
+  gemini_fallback_model: { type: "text", initial: "gemini-flash-lite-latest" },
   app_name: { type: "text", initial: "Stocked" },
   app_tagline: { type: "text", initial: "Household inventory" },
 };

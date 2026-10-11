@@ -5,6 +5,8 @@ import multer from "multer";
 import { SETTINGS_SCHEMA, coerceSetting, parseKind } from "./catalog.js";
 import { config } from "./config.js";
 import {
+  addGeminiKey,
+  deleteGeminiKey,
   exportBackup,
   findOrCreateCompany,
   findProductByNameCategory,
@@ -17,13 +19,16 @@ import {
   listBatchesForProduct,
   listCatalogNames,
   listCompanies,
+  listGeminiKeys,
   listProducts,
   listStockEvents,
   logStockEvent,
   nextBatchId,
   nextProductId,
+  noteGeminiKeyResult,
   normalizeKey,
   pruneCompany,
+  readGeminiKeys,
   restoreBackup,
   saveSetting,
   setBatchIdSeq,
@@ -31,7 +36,12 @@ import {
   setProductIdSeq,
   todayStamp,
 } from "./db.js";
-import { ALLOWED_IMAGE_TYPES, extractItem } from "./extract.js";
+import {
+  ALLOWED_IMAGE_TYPES,
+  checkGeminiKey,
+  extractItem,
+  listGeminiModels,
+} from "./extract.js";
 import {
   batchFieldsSource,
   coerceDate,
@@ -524,12 +534,72 @@ export function createRouter(db) {
           caption: String(req.body?.caption ?? ""),
           catalog,
           settings,
+          apiKeys: readGeminiKeys(db),
+          onKeyResult: (keyId, error) => noteGeminiKeyResult(db, keyId, error),
         });
         res.json({ item });
       } catch (err) {
         sendError(res, err);
       }
     });
+  });
+
+  // --- Gemini API keys ---
+
+  const geminiKeyList = () => ({ keys: listGeminiKeys(db) });
+
+  router.get("/gemini-keys", (_req, res) => {
+    try {
+      res.json(geminiKeyList());
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  router.post("/gemini-keys", async (req, res) => {
+    try {
+      const key = String(req.body?.key ?? "").trim();
+      if (!key) throw badRequest("Paste an API key.");
+      const problem = await checkGeminiKey(key);
+      if (problem) throw badRequest(`Google did not accept that key: ${problem}`);
+      addGeminiKey(db, key);
+      res.status(201).json(geminiKeyList());
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  router.post("/gemini-keys/:id/test", async (req, res) => {
+    try {
+      const keyId = parseId(req.params.id);
+      const entry = readGeminiKeys(db).find((row) => row.key_id === keyId);
+      if (!entry) throw notFound("That key is missing or can no longer be read.");
+      const problem = await checkGeminiKey(entry.key);
+      noteGeminiKeyResult(db, keyId, problem);
+      res.json({ ok: !problem, error: problem, ...geminiKeyList() });
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  router.get("/gemini-models", async (_req, res) => {
+    try {
+      const [first] = readGeminiKeys(db);
+      if (!first) throw badRequest("Add an API key first.");
+      res.json({ models: await listGeminiModels(first.key) });
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
+  router.delete("/gemini-keys/:id", (req, res) => {
+    try {
+      const keyId = parseId(req.params.id);
+      if (!keyId || !deleteGeminiKey(db, keyId)) throw notFound("Key not found.");
+      res.json(geminiKeyList());
+    } catch (err) {
+      sendError(res, err);
+    }
   });
 
   // --- Catalog & settings (unchanged shape) ---
@@ -602,6 +672,8 @@ export function createRouter(db) {
             to,
             from,
           );
+        } else if (kind === "size_unit") {
+          db.prepare("UPDATE batches SET size_unit = ? WHERE size_unit = ?").run(to, from);
         }
 
         const settings = getSettings(db);
@@ -640,6 +712,10 @@ export function createRouter(db) {
         inUse = db
           .prepare("SELECT COUNT(*) AS n FROM batches WHERE location = ?")
           .get(name);
+      } else if (kind === "size_unit") {
+        inUse = db
+          .prepare("SELECT COUNT(*) AS n FROM batches WHERE size_unit = ?")
+          .get(name);
       } else {
         inUse = db
           .prepare("SELECT COUNT(*) AS n FROM batches WHERE package_type = ?")
@@ -648,23 +724,6 @@ export function createRouter(db) {
       if ((inUse?.n ?? 0) > 0) {
         throw badRequest(
           `Cannot delete "${name}" — ${inUse.n} row(s) still use it. Rename first.`,
-        );
-      }
-
-      const settings = getSettings(db);
-      if (kind === "category" && settings.default_category === name) {
-        throw badRequest(
-          "Cannot delete the default category. Change defaults in Settings first.",
-        );
-      }
-      if (kind === "location" && settings.default_location === name) {
-        throw badRequest(
-          "Cannot delete the default location. Change defaults in Settings first.",
-        );
-      }
-      if (kind === "package_type" && settings.default_package_type === name) {
-        throw badRequest(
-          "Cannot delete the default package type. Change defaults in Settings first.",
         );
       }
 

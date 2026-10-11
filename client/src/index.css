@@ -994,6 +994,30 @@ body {
   flex: 0 1 130px;
 }
 
+.form-field-half {
+  min-width: 150px;
+  flex: 1 1 150px;
+}
+
+.form-field-count {
+  flex: 0 0 96px;
+}
+
+/* "More details": rarely used fields, folded away under a plain text toggle. */
+.more-fields.ant-collapse {
+  margin: -4px 0 8px;
+}
+
+.more-fields.ant-collapse > .ant-collapse-item > .ant-collapse-header {
+  padding: 4px 0;
+  color: var(--pantry-primary-deep);
+  font-weight: 600;
+}
+
+.more-fields.ant-collapse > .ant-collapse-item > .ant-collapse-content > .ant-collapse-content-box {
+  padding: 10px 0 0;
+}
+
 .ant-form-vertical .ant-form-item-label > label {
   font-weight: 600;
   color: var(--pantry-muted);
@@ -1095,6 +1119,18 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Package type with its size underneath, each kept on one line. */
+.batch-package {
+  display: inline-grid;
+  gap: 1px;
+  white-space: nowrap;
+}
+
+.batch-package small {
+  color: var(--pantry-muted);
+  font-size: 13px;
 }
 
 .batch-stepper {
@@ -1213,6 +1249,25 @@ body {
 
 .catalog-row strong {
   font-weight: 600;
+}
+
+.key-row {
+  align-items: flex-start;
+}
+
+.key-row-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.key-row-text span {
+  color: var(--pantry-muted);
+  font-size: 13px;
+}
+
+.key-row-text .key-row-error {
+  color: var(--pantry-danger);
 }
 
 /* ---------- Ant Design surfaces ---------- */
@@ -1443,6 +1498,12 @@ body {
   .catalog-row .ant-btn-sm {
     height: 36px;
     padding-inline: 12px;
+  }
+
+  .batch-stepper .ant-btn.ant-btn-sm {
+    width: 36px;
+    min-width: 36px;
+    height: 36px;
   }
 
   .ant-card .ant-card-head-title {

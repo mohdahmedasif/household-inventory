@@ -86,12 +86,13 @@ export type SheetRow = {
   acquired_on?: string;
 };
 
-export type CatalogKind = "category" | "location" | "package_type";
+export type CatalogKind = "category" | "location" | "package_type" | "size_unit";
 
 export type Catalog = {
   categories: string[];
   locations: string[];
   package_types: string[];
+  size_units: string[];
   defaults?: {
     category: string;
     location: string;
@@ -110,6 +111,8 @@ export type Settings = {
   lowercase_units: string[];
   blank_words: string[];
   extract_language: string;
+  gemini_model: string;
+  gemini_fallback_model: string;
   app_name: string;
   app_tagline: string;
 };
@@ -331,6 +334,45 @@ export function importItems(items: SheetRow[]) {
     method: "POST",
     body: JSON.stringify({ items }),
   });
+}
+
+export type GeminiKey = {
+  key_id: number;
+  /** Last four characters of the key; the key itself never leaves the server. */
+  hint: string;
+  created_at: string;
+  last_used_at: string;
+  last_error: string;
+  /** False when the server can no longer decrypt it and it must be entered again. */
+  readable: boolean;
+};
+
+export type GeminiKeyList = { keys: GeminiKey[] };
+
+export function fetchGeminiKeys() {
+  return request<GeminiKeyList>("/api/gemini-keys");
+}
+
+export function addGeminiKey(key: string) {
+  return request<GeminiKeyList>("/api/gemini-keys", {
+    method: "POST",
+    body: JSON.stringify({ key }),
+  });
+}
+
+export function testGeminiKey(keyId: number) {
+  return request<GeminiKeyList & { ok: boolean; error: string }>(
+    `/api/gemini-keys/${keyId}/test`,
+    { method: "POST" },
+  );
+}
+
+export function deleteGeminiKey(keyId: number) {
+  return request<GeminiKeyList>(`/api/gemini-keys/${keyId}`, { method: "DELETE" });
+}
+
+export function fetchGeminiModels() {
+  return request<{ models: { name: string; label: string }[] }>("/api/gemini-models");
 }
 
 export type Backup = {

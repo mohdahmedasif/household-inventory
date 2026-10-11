@@ -2,6 +2,7 @@
 .env
 .env.local
 credentials.json
+secret.key
 **/credentials*.json
 **/settings.yaml
 **/settings.local.yaml
