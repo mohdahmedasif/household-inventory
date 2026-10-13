@@ -4,13 +4,16 @@ import {
   BarChartOutlined,
   EllipsisOutlined,
   ImportOutlined,
+  LockOutlined,
   PlusOutlined,
   SettingOutlined,
   TableOutlined,
   TagsOutlined,
+  UserOutlined,
 } from "@ant-design/icons";
 import { Button, Drawer, Layout } from "antd";
 import { Link, NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { useAccess } from "../access/context";
 import { settings } from "../settings";
 import { PAGE_ACTIONS_ID, type LayoutContext, type PageTitleOverride } from "./PageActions";
 
@@ -70,6 +73,7 @@ function Brand({ to = "/" }: { to?: string }) {
 export default function AppLayout() {
   const { pathname } = useLocation();
   const navigate = useNavigate();
+  const access = useAccess();
   const [moreOpen, setMoreOpen] = useState(false);
   const [titleOverride, setTitleOverride] = useState<PageTitleOverride>(null);
   const outletContext = useMemo<LayoutContext>(() => ({ setTitleOverride }), []);
@@ -110,6 +114,18 @@ export default function AppLayout() {
         <nav className="nav-section sidebar-footer">
           <div className="nav-section-label">Setup</div>
           {SECONDARY_NAV.map(navLink)}
+          <div className="profile-bar">
+            <span className="profile-name" title={access.profile.name}>
+              <UserOutlined />
+              {access.profile.name}
+            </span>
+            <Button size="small" icon={<LockOutlined />} onClick={access.lock}>
+              Lock
+            </Button>
+            <Button size="small" onClick={access.switchProfile}>
+              Switch
+            </Button>
+          </div>
         </nav>
       </Sider>
 
@@ -182,6 +198,28 @@ export default function AppLayout() {
             {item.label}
           </Link>
         ))}
+        <button
+          type="button"
+          className="more-link"
+          onClick={() => {
+            setMoreOpen(false);
+            access.lock();
+          }}
+        >
+          <LockOutlined />
+          Lock now
+        </button>
+        <button
+          type="button"
+          className="more-link"
+          onClick={() => {
+            setMoreOpen(false);
+            access.switchProfile();
+          }}
+        >
+          <UserOutlined />
+          Switch profile ({access.profile.name})
+        </button>
       </Drawer>
     </Layout>
   );

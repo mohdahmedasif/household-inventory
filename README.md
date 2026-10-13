@@ -60,12 +60,18 @@ npm run build
 npm start
 ```
 
-Open **http://127.0.0.1:3000**.
+Open **http://127.0.0.1:3000**. The first visit asks for the admin key, which the server writes to `data/admin.key`.
 
 ### Docker
 
 ```bash
 docker compose up -d --build
+```
+
+On first start the server creates an admin key. Read it with:
+
+```bash
+docker compose exec inventory cat /data/admin.key
 ```
 
 - App: **http://127.0.0.1:3000** (or the `PORT` you set)
@@ -78,16 +84,36 @@ The app reads two environment variables, both optional. Copy [`.env.example`](.e
 | Variable | Purpose |
 |----------|---------|
 | `PORT` | The port the app is opened on (default `3000`) |
-| `KEY` | A password for the API and web UI (`Authorization: Bearer …`). Leave unset only on a network you trust. |
+| `ADMIN_KEY` | Pairs a new browser and resets a forgotten PIN. If unset, a random one is written to `admin.key` in the data directory on first start. |
 
 Everything else is set in the app and stored in the database:
 
-- **Settings** — expiry windows, list sizes, the Gemini model, app name, and Gemini API keys.
+- **Settings** — expiry windows, list sizes, auto-lock time, the Gemini model, app name, and Gemini API keys.
 - **Catalog** — categories, locations, package types, units, and the text rules.
 
 Gemini API keys are stored encrypted. The encryption key is the `secret.key` file in the data directory; without it, saved keys cannot be read and must be entered again.
 
-Never commit `.env`, `secret.key`, a database, or a backup file. Don't paste keys into issues or PRs.
+Never commit `.env`, `secret.key`, `admin.key`, a database, or a backup file. Don't paste keys or PINs into issues or PRs.
+
+## Access
+
+Two layers keep a stranger who finds the URL from seeing or guessing anything.
+
+1. **Pair the device.** A browser shows nothing until it is paired once with the admin key. Pairing sets a year-long cookie that is renewed every time a PIN is entered on that device.
+2. **Unlock a profile.** Each person has a profile with a 4 to 8 digit PIN. Day to day, the PIN is all that is typed.
+
+- Each profile has its own inventory, history, catalog lists, settings and Gemini keys, kept in its own database file (`profile-<id>.sqlite` in the data directory). One profile cannot see or change another's.
+- Deleting a profile removes its inventory from the app; the file is set aside as `deleted-profile-…sqlite` rather than erased.
+- Five wrong PINs in a row lock the profile for 1 minute, and each further wrong PIN for 5, 30, then 120 minutes. While locked, the correct PIN is refused too.
+- The app asks for the PIN again after it has been in the background or closed for a while (5 minutes by default; change it in Settings).
+- A forgotten PIN is replaced with the admin key. A lost phone is cut off with **Settings → Unpair other devices**.
+- PINs are stored as salted scrypt hashes; device and session cookies are stored only as SHA-256 hashes.
+
+**HTTPS.** Run the app behind HTTPS whenever it is reachable from the internet. The cookies are marked `Secure` on HTTPS requests. Over plain HTTP (localhost, or a home network without TLS) they are sent without that flag so the app still works, which means anyone who can watch that network traffic could copy them.
+
+**Behind a reverse proxy, rate limits are shared.** The limit of 20 pairing attempts per 5 minutes counts everyone together instead of per visitor, because every request appears to come from the proxy. Guessing is still capped just as hard, but someone hammering the pairing screen could block you from pairing a new device for a few minutes.
+
+The PIN is a lock on the app's door, not encryption: the database file on the server is not encrypted.
 
 ## Data model
 
@@ -103,7 +129,7 @@ Never commit `.env`, `secret.key`, a database, or a backup file. Don't paste key
 
 ### Backup and restore
 
-**Import → Full backup** downloads one JSON file with every product, purchase, history entry, catalog list and setting. Restoring it replaces everything in the app with the file's contents. Gemini API keys are not part of the backup.
+**Import → Full backup** downloads one JSON file with every product, purchase, history entry, catalog list and setting. Restoring it replaces everything in that profile with the file's contents. A backup covers the profile it was made in; Gemini API keys, PINs and paired devices are not part of it.
 
 ### Import from Google Sheets
 
@@ -124,7 +150,7 @@ Rows with the same name + category merge into one product; each row becomes a ba
 ```bash
 git clone https://github.com/mohdahmedasif/household-inventory.git
 cd household-inventory
-cp .env.example .env   # set KEY
+cp .env.example .env   # optional: set ADMIN_KEY
 docker compose up -d --build
 ```
 
@@ -146,7 +172,7 @@ On the server, [`scripts/deploy.sh`](scripts/deploy.sh) pulls `main`, installs d
 bash scripts/deploy.sh
 ```
 
-Put the app behind HTTPS and set `KEY` whenever it is reachable from the internet.
+Put the app behind HTTPS whenever it is reachable from the internet.
 
 ## Contributing
 

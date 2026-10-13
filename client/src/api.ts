@@ -113,6 +113,7 @@ export type Settings = {
   extract_language: string;
   gemini_model: string;
   gemini_fallback_model: string;
+  auto_lock_minutes: number;
   app_name: string;
   app_tagline: string;
 };
@@ -149,45 +150,120 @@ export type Stats = {
   }>;
 };
 
-export class AuthError extends Error {
-  constructor() {
-    super("Unauthorized");
-    this.name = "AuthError";
+/** A failed request, with the server's machine-readable code and any extra fields it sent. */
+export class ApiError extends Error {
+  status: number;
+  code: string;
+  data: Record<string, unknown>;
+
+  constructor(message: string, status: number, data: Record<string, unknown>) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = String(data.code ?? "");
+    this.data = data;
   }
 }
 
-const KEY_STORAGE = "inventory.apiKey";
+type AccessListener = (state: "unpaired" | "locked") => void;
+let accessListener: AccessListener = () => undefined;
 
-export function getApiKey(): string {
-  return sessionStorage.getItem(KEY_STORAGE) || "";
+/** The app shell listens here to show the pairing or PIN screen when the server asks for one. */
+export function onAccessLost(listener: AccessListener): void {
+  accessListener = listener;
 }
 
-export function setApiKey(key: string): void {
-  if (key) sessionStorage.setItem(KEY_STORAGE, key);
-  else sessionStorage.removeItem(KEY_STORAGE);
-}
-
+// Access rides on httpOnly cookies, which the browser sends by itself.
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
   const isFormData = typeof FormData !== "undefined" && init.body instanceof FormData;
   if (init.body && !isFormData && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  const key = getApiKey();
-  if (key) headers.set("Authorization", `Bearer ${key}`);
 
   const res = await fetch(path, { ...init, headers });
-  if (res.status === 401) throw new AuthError();
   const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
+  let data: Record<string, unknown> | null = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = null;
+  }
   if (!res.ok) {
-    throw new Error(data?.error || `Request failed (${res.status})`);
+    const error = new ApiError(String(data?.error ?? `Request failed (${res.status})`), res.status, data ?? {});
+    if (res.status === 403 && error.code === "unpaired") accessListener("unpaired");
+    if (res.status === 401 && error.code === "locked") accessListener("locked");
+    throw error;
   }
   return data as T;
 }
 
-export function fetchAuthStatus() {
-  return request<{ required: boolean; app_name: string; app_tagline: string }>("/api/auth");
+// ---------- Access: pairing, profiles, PIN ----------
+
+export type Profile = { profile_id: number; name: string };
+
+export type AccessStatus = {
+  paired: boolean;
+  profile: Profile | null;
+  app_name: string;
+  app_tagline: string;
+  pin_min: number;
+  pin_max: number;
+};
+
+const post = (body: unknown = {}) => ({ method: "POST", body: JSON.stringify(body) });
+
+export function fetchAccessStatus() {
+  return request<AccessStatus>("/api/auth/status");
+}
+
+export function pairDevice(adminKey: string) {
+  return request<{ paired: boolean }>("/api/auth/pair", post({ admin_key: adminKey }));
+}
+
+export function fetchProfiles() {
+  return request<{ profiles: Profile[] }>("/api/profiles");
+}
+
+export function createProfile(name: string, pin: string) {
+  return request<Profile>("/api/profiles", post({ name, pin }));
+}
+
+export function unlockProfile(profileId: number, pin: string) {
+  return request<{ profile: Profile }>("/api/auth/unlock", post({ profile_id: profileId, pin }));
+}
+
+export function lockSession() {
+  return request<{ ok: boolean }>("/api/auth/lock", post());
+}
+
+export function resetPin(profileId: number, adminKey: string, pin: string) {
+  return request<{ ok: boolean }>(
+    `/api/profiles/${profileId}/reset-pin`,
+    post({ admin_key: adminKey, pin }),
+  );
+}
+
+export function changePin(currentPin: string, newPin: string) {
+  return request<{ ok: boolean }>(
+    "/api/profiles/me/pin",
+    post({ current_pin: currentPin, new_pin: newPin }),
+  );
+}
+
+export function deleteProfile(pin: string) {
+  return request<{ ok: boolean }>("/api/profiles/me", {
+    method: "DELETE",
+    body: JSON.stringify({ pin }),
+  });
+}
+
+export function unpairDevice() {
+  return request<{ ok: boolean }>("/api/auth/unpair", post());
+}
+
+export function unpairOtherDevices() {
+  return request<{ removed: number }>("/api/auth/unpair-others", post());
 }
 
 export function fetchCatalog() {
@@ -281,7 +357,16 @@ export type StockEvent = {
   delta: number;
   count_after: number;
   created_at: string;
+  /** The purchase it was about, e.g. "Company · Can 330 g · expires 2028-08-31". */
+  detail: string;
+  /** The profile that made the change; empty for entries from before profiles existed. */
+  actor: string;
+  can_undo: boolean;
 };
+
+export function undoStockEvent(eventId: number) {
+  return request<Product>(`/api/events/${eventId}/undo`, { method: "POST" });
+}
 
 export function fetchProductEvents(id: number) {
   return request<{ events: StockEvent[] }>(`/api/products/${id}/events`);

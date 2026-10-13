@@ -44,4 +44,4 @@ inventory-export*
 **/inventory-export*
 inventory-backup*.json
 **/inventory-backup*.json
-before-last-restore.json
+before-last-restore*.json

@@ -1,8 +1,17 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
-import { App as AntdApp, Button, Card, Form, Input, Typography } from "antd";
-import { AuthError, fetchAuthStatus, fetchSettings, getApiKey, setApiKey } from "./api";
-import { applySettings } from "./settings";
+import { App as AntdApp } from "antd";
+import {
+  fetchAccessStatus,
+  fetchProfiles,
+  fetchSettings,
+  lockSession,
+  onAccessLost,
+  type Profile,
+} from "./api";
+import { PairScreen, PinScreen, ProfilePicker, type Brand } from "./access/AccessScreens";
+import { AccessContext, type Access } from "./access/context";
+import { applySettings, settings } from "./settings";
 import AppLayout from "./layout/AppLayout";
 import CatalogPage from "./pages/CatalogPage";
 import ImportPage from "./pages/ImportPage";
@@ -12,101 +21,179 @@ import ReportsPage from "./pages/ReportsPage";
 import SettingsPage from "./pages/SettingsPage";
 import StatsPage from "./pages/StatsPage";
 
+// pair (first time only) → pick a profile → PIN → app
+type Stage =
+  | { kind: "loading" }
+  | { kind: "pair" }
+  | { kind: "pick" }
+  | { kind: "pin"; profile: Profile }
+  | { kind: "app"; profile: Profile };
+
+// Remembered on this device only: who used it last, when the app went to the
+// background, and how long it may stay there before the PIN is asked again.
+const LAST_PROFILE = "inventory.lastProfile";
+const HIDDEN_AT = "inventory.hiddenAt";
+const AUTO_LOCK_MINUTES = "inventory.autoLockMinutes";
+
+function recall<T>(key: string): T | null {
+  try {
+    return JSON.parse(localStorage.getItem(key) ?? "null") as T | null;
+  } catch {
+    return null;
+  }
+}
+
+function awayTooLong(): boolean {
+  const hiddenAt = recall<number>(HIDDEN_AT);
+  const minutes = recall<number>(AUTO_LOCK_MINUTES);
+  return Boolean(hiddenAt && minutes && Date.now() - hiddenAt > minutes * 60 * 1000);
+}
+
 export default function App() {
   const { message } = AntdApp.useApp();
-  const [ready, setReady] = useState(false);
-  const [needsKey, setNeedsKey] = useState(false);
-  const [brand, setBrand] = useState({ app_name: "", app_tagline: "" });
+  const [stage, setStage] = useState<Stage>({ kind: "loading" });
+  const [brand, setBrand] = useState<Brand>({ app_name: "", app_tagline: "", pin_min: 0, pin_max: 0 });
+  const stageRef = useRef(stage);
+  stageRef.current = stage;
 
-  // Settings come from the database and must be in place before any page renders.
-  async function start(keyJustEntered = false) {
-    try {
-      applySettings(await fetchSettings());
-      setNeedsKey(false);
-      setReady(true);
-    } catch (err) {
-      if (err instanceof AuthError) {
-        setNeedsKey(true);
-        if (keyJustEntered) message.error("That key was not accepted. Check it and try again.");
-        return;
+  const enterApp = useCallback(
+    async (profile: Profile) => {
+      try {
+        const loaded = await fetchSettings();
+        applySettings(loaded);
+        localStorage.setItem(LAST_PROFILE, JSON.stringify(profile));
+        localStorage.setItem(AUTO_LOCK_MINUTES, JSON.stringify(loaded.auto_lock_minutes));
+        localStorage.removeItem(HIDDEN_AT);
+        setStage({ kind: "app", profile });
+      } catch (err) {
+        message.error(err instanceof Error ? err.message : "Could not load the app");
       }
-      message.error(err instanceof Error ? err.message : "Could not reach the API");
+    },
+    [message],
+  );
+
+  const lock = useCallback(async (profile: Profile) => {
+    await lockSession().catch(() => undefined);
+    localStorage.removeItem(HIDDEN_AT);
+    setStage({ kind: "pin", profile });
+  }, []);
+
+  // Work out where this browser stands: unpaired, paired, or already unlocked.
+  const start = useCallback(async () => {
+    try {
+      const status = await fetchAccessStatus();
+      setBrand(status);
+      document.title = [status.app_name, status.app_tagline].filter(Boolean).join(" · ");
+      if (!status.paired) return setStage({ kind: "pair" });
+      if (status.profile) {
+        if (awayTooLong()) return void lock(status.profile);
+        return void enterApp(status.profile);
+      }
+      const last = recall<Profile>(LAST_PROFILE);
+      const { profiles } = await fetchProfiles();
+      const known = profiles.find((profile) => profile.profile_id === last?.profile_id);
+      setStage(known ? { kind: "pin", profile: known } : { kind: "pick" });
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : "Could not reach the app");
     }
-  }
+  }, [enterApp, lock, message]);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const status = await fetchAuthStatus();
-        if (cancelled) return;
-        setBrand(status);
-        if (status.required && !getApiKey()) setNeedsKey(true);
-        else await start();
-      } catch (err) {
-        message.error(err instanceof Error ? err.message : "Could not reach the API");
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [message]);
+    void start();
+  }, [start]);
 
-  if (needsKey) {
+  // The server can end access at any time (unpaired elsewhere, session expired).
+  useEffect(() => {
+    onAccessLost((state) => {
+      const current = stageRef.current;
+      if (state === "unpaired") setStage({ kind: "pair" });
+      else if (current.kind === "app") setStage({ kind: "pin", profile: current.profile });
+    });
+    return () => onAccessLost(() => undefined);
+  }, []);
+
+  // Auto-lock: note when the app goes to the background, and ask for the PIN
+  // again if it comes back (or is reopened) after too long.
+  const unlockedProfile = stage.kind === "app" ? stage.profile : null;
+  useEffect(() => {
+    if (!unlockedProfile) return;
+    // Keep the first moment it went out of view: closing a tab that was
+    // already in the background must not restart the clock.
+    const onHide = () => {
+      if (!recall<number>(HIDDEN_AT)) localStorage.setItem(HIDDEN_AT, JSON.stringify(Date.now()));
+    };
+    const onChange = () => {
+      if (document.visibilityState === "hidden") return onHide();
+      localStorage.setItem(AUTO_LOCK_MINUTES, JSON.stringify(settings().auto_lock_minutes));
+      if (awayTooLong()) void lock(unlockedProfile);
+      else localStorage.removeItem(HIDDEN_AT);
+    };
+    document.addEventListener("visibilitychange", onChange);
+    window.addEventListener("pagehide", onHide);
+    return () => {
+      document.removeEventListener("visibilitychange", onChange);
+      window.removeEventListener("pagehide", onHide);
+    };
+  }, [unlockedProfile, lock]);
+
+  const access = useMemo<Access | null>(() => {
+    if (!unlockedProfile) return null;
+    return {
+      profile: unlockedProfile,
+      lock: () => void lock(unlockedProfile),
+      switchProfile: () => {
+        void lockSession()
+          .catch(() => undefined)
+          .then(() => {
+            localStorage.removeItem(LAST_PROFILE);
+            setStage({ kind: "pick" });
+          });
+      },
+      restart: () => {
+        localStorage.removeItem(LAST_PROFILE);
+        setStage({ kind: "loading" });
+        void start();
+      },
+    };
+  }, [unlockedProfile, lock, start]);
+
+  if (stage.kind === "loading") return null;
+  if (stage.kind === "pair") return <PairScreen brand={brand} onPaired={() => void start()} />;
+  if (stage.kind === "pick") {
+    return <ProfilePicker brand={brand} onPick={(profile) => setStage({ kind: "pin", profile })} />;
+  }
+  if (stage.kind === "pin") {
     return (
-      <div className="login-wrap">
-        <div className="login-stack">
-          <div className="login-hero">
-            <img src="/logo.svg" alt="" />
-            <h1>{brand.app_name}</h1>
-            <p>{brand.app_tagline}</p>
-          </div>
-        <Card className="login-card" title="Unlock">
-          <Typography.Paragraph type="secondary">
-            This API is protected. Paste the same <code>KEY</code> you set on the
-            server.
-          </Typography.Paragraph>
-          <Form
-            layout="vertical"
-            onFinish={(values: { key: string }) => {
-              setApiKey(values.key.trim());
-              void start(true);
-            }}
-          >
-            <Form.Item
-              name="key"
-              label="API key"
-              rules={[{ required: true, message: "Enter the API key" }]}
-            >
-              <Input.Password autoFocus />
-            </Form.Item>
-            <Button type="primary" htmlType="submit" size="large" block>
-              Continue
-            </Button>
-          </Form>
-        </Card>
-        </div>
-      </div>
+      <PinScreen
+        key={stage.profile.profile_id}
+        brand={brand}
+        profile={stage.profile}
+        onUnlocked={(profile) => void enterApp(profile)}
+        onBack={() => {
+          localStorage.removeItem(LAST_PROFILE);
+          setStage({ kind: "pick" });
+        }}
+      />
     );
   }
 
-  if (!ready) return null;
-
   return (
-    <Routes>
-      <Route element={<AppLayout />}>
-        <Route path="/" element={<ItemsPage />} />
-        <Route path="/products/new" element={<ItemFormPage />} />
-        <Route path="/products/:id" element={<ItemFormPage />} />
-        <Route path="/items/new" element={<Navigate to="/products/new" replace />} />
-        <Route path="/items/:id" element={<ItemFormPage />} />
-        <Route path="/stats" element={<StatsPage />} />
-        <Route path="/reports" element={<ReportsPage />} />
-        <Route path="/catalog" element={<CatalogPage />} />
-        <Route path="/import" element={<ImportPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Route>
-    </Routes>
+    <AccessContext.Provider value={access}>
+      <Routes>
+        <Route element={<AppLayout />}>
+          <Route path="/" element={<ItemsPage />} />
+          <Route path="/products/new" element={<ItemFormPage />} />
+          <Route path="/products/:id" element={<ItemFormPage />} />
+          <Route path="/items/new" element={<Navigate to="/products/new" replace />} />
+          <Route path="/items/:id" element={<ItemFormPage />} />
+          <Route path="/stats" element={<StatsPage />} />
+          <Route path="/reports" element={<ReportsPage />} />
+          <Route path="/catalog" element={<CatalogPage />} />
+          <Route path="/import" element={<ImportPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Route>
+      </Routes>
+    </AccessContext.Provider>
   );
 }

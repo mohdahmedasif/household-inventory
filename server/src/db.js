@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { DEFAULT_SEEDS, SETTINGS_SCHEMA, coerceSetting, sentenceCase, titleCase } from "./catalog.js";
+import { currentActor } from "./actor.js";
 import { config } from "./config.js";
 import { decryptSecret, encryptSecret } from "./secrets.js";
 
@@ -58,7 +59,9 @@ CREATE TABLE IF NOT EXISTS stock_events (
   kind TEXT NOT NULL,
   delta INTEGER NOT NULL,
   count_after INTEGER NOT NULL,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  detail TEXT NOT NULL DEFAULT '',
+  actor TEXT NOT NULL DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_stock_events_product_id ON stock_events(product_id);
@@ -73,6 +76,34 @@ CREATE TABLE IF NOT EXISTS gemini_keys (
   last_used_at TEXT NOT NULL DEFAULT '',
   last_error TEXT NOT NULL DEFAULT ''
 );
+-- Access: browsers paired with the admin key, profiles with a PIN, and the
+-- sessions opened by unlocking a profile. Only hashes are stored.
+CREATE TABLE IF NOT EXISTS devices (
+  device_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  token_hash TEXT NOT NULL UNIQUE,
+  label TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS profiles (
+  profile_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  pin_hash TEXT NOT NULL,
+  pin_salt TEXT NOT NULL,
+  failed_attempts INTEGER NOT NULL DEFAULT 0,
+  locked_until TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+  session_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  token_hash TEXT NOT NULL UNIQUE,
+  profile_id INTEGER NOT NULL REFERENCES profiles(profile_id) ON DELETE CASCADE,
+  device_id INTEGER NOT NULL REFERENCES devices(device_id) ON DELETE CASCADE,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_products_name_key_category
   ON products(name_key, category);
 CREATE INDEX IF NOT EXISTS idx_batches_product_id ON batches(product_id);
@@ -86,6 +117,8 @@ export function createDb(filePath) {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.exec(SCHEMA);
+  ensureColumn(db, "stock_events", "detail", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "stock_events", "actor", "TEXT NOT NULL DEFAULT ''");
   migrateFromItems(db);
   ensureSeq(db, "product_id_seq", "products", "product_id");
   ensureSeq(db, "company_id_seq", "companies", "company_id");
@@ -175,7 +208,8 @@ export function noteGeminiKeyResult(db, keyId, error = "") {
 export const BACKUP_FORMAT = "household-inventory-backup";
 export const BACKUP_VERSION = 1;
 
-// Parents before children, so a restore can insert in this order.
+// Parents before children, so a restore can insert in this order. Access tables
+// (devices, profiles, sessions) and Gemini keys are deliberately left out.
 const BACKUP_TABLES = ["companies", "products", "batches", "stock_events", "catalog_options", "meta"];
 
 /** Every row of every table, as one JSON-serializable object. */
@@ -244,6 +278,12 @@ export function restoreBackup(db, backup) {
   restore();
   seedCatalog(db);
   return counts;
+}
+
+// Columns added after a table first shipped.
+function ensureColumn(db, table, column, definition) {
+  const exists = db.prepare(`PRAGMA table_info(${table})`).all().some((row) => row.name === column);
+  if (!exists) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
 }
 
 function ensureSeq(db, key, table, column) {
@@ -522,22 +562,64 @@ export function setBatchIdSeq(db, batchId) {
   setMeta(db, "id_seq", batchId);
 }
 
+/** Which purchase an event was about: "Company · Can 330 g · expires 2028-08-31". */
+function describeBatch(batch) {
+  if (!batch) return "";
+  const size = [batch.size_value, batch.size_unit].filter(Boolean).join(" ");
+  return [
+    batch.company,
+    [batch.package_type, size].filter(Boolean).join(" "),
+    batch.expiry_date ? `expires ${batch.expiry_date}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+// The purchase is described at the time of the event, so the history still
+// reads properly after that purchase is edited or deleted.
 export function logStockEvent(db, { productId, batchId, kind, delta, countAfter, createdAt }) {
   if (!delta) return;
   db.prepare(
-    `INSERT INTO stock_events (product_id, batch_id, kind, delta, count_after, created_at)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-  ).run(productId, batchId, kind, delta, countAfter, createdAt || new Date().toISOString());
+    `INSERT INTO stock_events (product_id, batch_id, kind, delta, count_after, created_at, detail, actor)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    productId,
+    batchId,
+    kind,
+    delta,
+    countAfter,
+    createdAt || new Date().toISOString(),
+    describeBatch(getBatch(db, batchId)),
+    currentActor(),
+  );
 }
 
 export function listStockEvents(db, productId, limit = config.historyLimit) {
   return db
     .prepare(
-      `SELECT event_id, batch_id, kind, delta, count_after, created_at
+      `SELECT event_id, batch_id, kind, delta, count_after, created_at, detail, actor
        FROM stock_events WHERE product_id = ?
        ORDER BY created_at DESC, event_id DESC LIMIT ?`,
     )
-    .all(productId, limit);
+    .all(productId, limit)
+    .map((event) => {
+      const batch = event.batch_id ? getBatch(db, event.batch_id) : null;
+      return {
+        ...event,
+        // Entries logged before details were recorded borrow the purchase's current ones.
+        detail: event.detail || describeBatch(batch),
+        // Only a use or a correction on a purchase that still exists can be taken back.
+        can_undo: Boolean(batch) && (event.kind === "used" || event.kind === "added"),
+      };
+    });
+}
+
+export function getStockEvent(db, eventId) {
+  return db.prepare("SELECT * FROM stock_events WHERE event_id = ?").get(eventId);
+}
+
+export function deleteStockEvent(db, eventId) {
+  db.prepare("DELETE FROM stock_events WHERE event_id = ?").run(eventId);
 }
 
 export function findOrCreateCompany(db, brandName) {

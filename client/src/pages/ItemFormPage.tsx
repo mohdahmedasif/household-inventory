@@ -58,6 +58,7 @@ import {
   type ProductSummary,
   type SimilarProduct,
   type StockEvent,
+  undoStockEvent,
 } from "../api";
 import {
   emptyBatchInput,
@@ -93,8 +94,8 @@ type NewProductForm = ProductCreateInput & {
 const EVENT_LABELS: Record<StockEvent["kind"], string> = {
   purchase: "Purchased",
   used: "Used",
-  added: "Count raised",
-  removed: "Batch deleted",
+  added: "Added back",
+  removed: "Purchase deleted",
 };
 
 export default function ItemFormPage() {
@@ -417,6 +418,17 @@ export default function ItemFormPage() {
     }
   }
 
+  async function onUndoEvent(event: StockEvent) {
+    if (!productId) return;
+    try {
+      await undoStockEvent(event.event_id);
+      await reload(productId);
+      message.success("Undone");
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : "Undo failed");
+    }
+  }
+
   async function onSaveNote(batch: Batch, next: string) {
     if (!productId) return;
     const notes = next.trim();
@@ -467,6 +479,9 @@ export default function ItemFormPage() {
       </Form.Item>
     </Space.Compact>
   );
+
+  const inStock = (product?.batches ?? []).filter((batch) => batch.package_count > 0);
+  const usedUp = (product?.batches ?? []).filter((batch) => batch.package_count <= 0);
 
   const batchColumns: ColumnsType<Batch> = [
     {
@@ -934,10 +949,34 @@ export default function ItemFormPage() {
           size="middle"
           rowKey="batch_id"
           columns={batchColumns}
-          dataSource={product?.batches ?? []}
+          dataSource={inStock}
+          locale={{ emptyText: "Nothing in stock" }}
           pagination={false}
           scroll={{ x: 1000 }}
         />
+        {usedUp.length ? (
+          <Collapse
+            ghost
+            className="more-fields used-up"
+            items={[
+              {
+                key: "used",
+                label: `Used up (${usedUp.length})`,
+                children: (
+                <Table
+                  showHeader={false}
+          size="middle"
+          rowKey="batch_id"
+          columns={batchColumns}
+          dataSource={usedUp}
+          pagination={false}
+          scroll={{ x: 1000 }}
+        />
+                ),
+              },
+            ]}
+          />
+        ) : null}
       </Card>
 
       <Card title="History" className="surface-card" style={{ marginBottom: 18 }}>
@@ -949,11 +988,29 @@ export default function ItemFormPage() {
                   {event.delta > 0 ? `+${event.delta}` : event.delta}
                 </span>
                 <span className="history-what">
-                  {EVENT_LABELS[event.kind] ?? event.kind}
-                  {event.batch_id ? <span className="batch-id"> · #{event.batch_id}</span> : null}
+                  <strong>{EVENT_LABELS[event.kind] ?? event.kind}</strong>
+                  <span>
+                    {event.detail || "Purchase"}
+                    {event.batch_id ? <span className="batch-id"> · #{event.batch_id}</span> : null}
+                  </span>
+                  <span>
+                    {event.count_after - event.delta} → {event.count_after} left in this purchase
+                  </span>
                 </span>
                 <span className="history-when">
-                  {dayjs(event.created_at).format("D MMM YYYY, HH:mm")}
+                  <span>
+                    {dayjs(event.created_at).format("D MMM YYYY, HH:mm")}
+                    {event.actor ? ` · ${event.actor}` : ""}
+                  </span>
+                  {event.can_undo ? (
+                    <Popconfirm
+                      title="Undo this entry?"
+                      description="The count goes back and this entry is removed."
+                      onConfirm={() => void onUndoEvent(event)}
+                    >
+                      <Button size="small">Undo</Button>
+                    </Popconfirm>
+                  ) : null}
                 </span>
               </li>
             ))}

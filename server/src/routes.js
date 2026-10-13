@@ -7,6 +7,7 @@ import { config } from "./config.js";
 import {
   addGeminiKey,
   deleteGeminiKey,
+  deleteStockEvent,
   exportBackup,
   findOrCreateCompany,
   findProductByNameCategory,
@@ -15,6 +16,7 @@ import {
   getCatalog,
   getProduct,
   getSettings,
+  getStockEvent,
   listBatchRecords,
   listBatchesForProduct,
   listCatalogNames,
@@ -298,7 +300,7 @@ export function createRouter(db) {
     return getProduct(db, productId);
   });
 
-  const updateBatchTx = db.transaction((batchId, patch, { kind } = {}) => {
+  const updateBatchTx = db.transaction((batchId, patch, { kind, log = true } = {}) => {
     const current = getBatch(db, batchId);
     if (!current) throw notFound("Batch not found.");
     const oldCompanyId = current.company_id;
@@ -346,7 +348,7 @@ export function createRouter(db) {
       pruneCompany(db, oldCompanyId);
     }
     const delta = merged.package_count - current.package_count;
-    if (delta) {
+    if (log && delta) {
       logStockEvent(db, {
         productId: current.product_id,
         batchId,
@@ -869,6 +871,29 @@ export function createRouter(db) {
     }
   });
 
+  // Take back one history entry: the purchase's count goes back and the entry is removed.
+  router.post("/events/:id/undo", (req, res) => {
+    try {
+      const event = getStockEvent(db, parseId(req.params.id));
+      if (!event) throw notFound("That history entry no longer exists.");
+      if (event.kind !== "used" && event.kind !== "added") {
+        throw badRequest("Only a use or a count correction can be undone.");
+      }
+      const batch = event.batch_id ? getBatch(db, event.batch_id) : null;
+      if (!batch) throw badRequest("That purchase has been deleted, so this cannot be undone.");
+      const restored = batch.package_count - event.delta;
+      if (restored < 0) throw badRequest("Undoing this would take the count below zero.");
+      const undo = db.transaction(() => {
+        updateBatchTx(batch.batch_id, { package_count: restored }, { log: false });
+        deleteStockEvent(db, event.event_id);
+      });
+      undo();
+      res.json(getProduct(db, batch.product_id));
+    } catch (err) {
+      sendError(res, err);
+    }
+  });
+
   router.post("/products", (req, res) => {
     try {
       const productFields = normalizeProduct(db, req.body);
@@ -1143,7 +1168,10 @@ export function createRouter(db) {
         }
         // Keep what is about to be replaced, next to the database, in case the
         // wrong file was chosen.
-        const safetyCopy = path.join(path.dirname(db.name), "before-last-restore.json");
+        const safetyCopy = path.join(
+          path.dirname(db.name),
+          `before-last-restore-${path.basename(db.name, ".sqlite")}.json`,
+        );
         fs.writeFileSync(safetyCopy, JSON.stringify(exportBackup(db)));
         const restored = restoreBackup(db, backup);
         res.json({ restored, exported_at: backup.exported_at ?? "" });

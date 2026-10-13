@@ -6,29 +6,84 @@ import {
   Form,
   Input,
   InputNumber,
+  Modal,
   Popconfirm,
   Select,
+  Space,
   Typography,
 } from "antd";
 import dayjs from "dayjs";
 import {
   addGeminiKey,
+  changePin,
+  deleteProfile,
   deleteGeminiKey,
   fetchGeminiKeys,
   fetchGeminiModels,
+  fetchAccessStatus,
   fetchSettings,
-  getApiKey,
-  setApiKey,
   testGeminiKey,
+  unpairDevice,
+  unpairOtherDevices,
   updateSettings,
   type GeminiKeyList,
   type Settings,
 } from "../api";
+import { pinRules } from "../access/AccessScreens";
+import { useAccess } from "../access/context";
 import { applySettings } from "../settings";
 
 export default function SettingsPage() {
   const { message } = AntdApp.useApp();
-  const [apiKeyDraft, setApiKeyDraft] = useState(getApiKey());
+  const access = useAccess();
+  const [pinForm] = Form.useForm<{ current_pin: string; new_pin: string }>();
+  const [pinLimits, setPinLimits] = useState({ pin_min: 0, pin_max: 0 });
+  const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    fetchAccessStatus()
+      .then((status) => setPinLimits(status))
+      .catch(() => undefined);
+  }, []);
+
+  async function onChangePin(values: { current_pin: string; new_pin: string }) {
+    try {
+      await changePin(values.current_pin, values.new_pin);
+      pinForm.resetFields();
+      message.success("PIN changed");
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : "Could not change the PIN");
+    }
+  }
+
+  async function onUnpairThis() {
+    try {
+      await unpairDevice();
+      access.restart();
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : "Could not unpair");
+    }
+  }
+
+  async function onUnpairOthers() {
+    try {
+      const { removed } = await unpairOtherDevices();
+      message.success(removed ? `Unpaired ${removed} other device${removed === 1 ? "" : "s"}` : "No other devices were paired");
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : "Could not unpair the other devices");
+    }
+  }
+
+  async function onDeleteProfile(values: { pin: string }) {
+    try {
+      await deleteProfile(values.pin);
+      setDeleting(false);
+      access.restart();
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : "Could not delete the profile");
+    }
+  }
+
   const [saving, setSaving] = useState(false);
   const [form] = Form.useForm<Settings>();
   const [keyForm] = Form.useForm<{ key: string }>();
@@ -200,6 +255,13 @@ export default function SettingsPage() {
           </Card>
 
           <Card title="App" className="surface-card">
+            <Form.Item
+              name="auto_lock_minutes"
+              label="Ask for the PIN again after (minutes in the background)"
+              rules={[{ required: true }]}
+            >
+              <InputNumber min={1} max={240} style={{ width: "100%" }} />
+            </Form.Item>
             <div className="form-row">
               <Form.Item
                 name="app_name"
@@ -297,28 +359,65 @@ export default function SettingsPage() {
         </Form>
       </Card>
 
-      <Card title="App access key" className="surface-card stack-gap">
-        <Typography.Paragraph type="secondary">
-          The password for this app itself, if the server has one. Stored only in this browser
-          session; must match <code>KEY</code> on the server.
-        </Typography.Paragraph>
-        <Form
-          layout="vertical"
-          onFinish={(values: { key: string }) => {
-            setApiKey(values.key.trim());
-            setApiKeyDraft(values.key.trim());
-            message.success("API key updated for this session");
-          }}
-          initialValues={{ key: apiKeyDraft }}
-        >
-          <Form.Item name="key" label="Bearer token">
-            <Input.Password placeholder="Leave blank if the API is open" />
-          </Form.Item>
+      <Card title={`Access · ${access.profile.name}`} className="surface-card stack-gap">
+        <Form form={pinForm} layout="vertical" onFinish={(values) => void onChangePin(values)}>
+          <div className="form-row">
+            <Form.Item
+              name="current_pin"
+              label="Current PIN"
+              className="form-field-wide"
+              rules={[{ required: true, message: "Enter your current PIN" }]}
+            >
+              <Input.Password inputMode="numeric" autoComplete="off" maxLength={pinLimits.pin_max} />
+            </Form.Item>
+            <Form.Item name="new_pin" label="New PIN" className="form-field-wide" rules={pinRules(pinLimits)}>
+              <Input.Password inputMode="numeric" autoComplete="new-password" maxLength={pinLimits.pin_max} />
+            </Form.Item>
+          </div>
           <Button type="primary" htmlType="submit">
-            Save API key
+            Change PIN
           </Button>
         </Form>
+        <Space wrap className="stack-gap">
+          <Popconfirm
+            title="Unpair this device?"
+            description="It will need the admin key to be used again."
+            onConfirm={() => void onUnpairThis()}
+          >
+            <Button>Unpair this device</Button>
+          </Popconfirm>
+          <Popconfirm
+            title="Unpair every other device?"
+            description="Use this if a phone or laptop was lost. Each one needs the admin key again."
+            onConfirm={() => void onUnpairOthers()}
+          >
+            <Button>Unpair other devices</Button>
+          </Popconfirm>
+          <Button danger onClick={() => setDeleting(true)}>
+            Delete profile
+          </Button>
+        </Space>
       </Card>
+
+      <Modal
+        title={`Delete ${access.profile.name}?`}
+        open={deleting}
+        onCancel={() => setDeleting(false)}
+        footer={null}
+        destroyOnClose
+      >
+        <Typography.Paragraph type="secondary">
+          This removes the profile, its PIN and everything in its inventory.
+        </Typography.Paragraph>
+        <Form layout="vertical" onFinish={(values) => void onDeleteProfile(values)}>
+          <Form.Item name="pin" label="PIN" rules={[{ required: true, message: "Enter this profile’s PIN" }]}>
+            <Input.Password autoFocus inputMode="numeric" autoComplete="off" maxLength={pinLimits.pin_max} />
+          </Form.Item>
+          <Button danger type="primary" htmlType="submit" block>
+            Delete profile
+          </Button>
+        </Form>
+      </Modal>
     </>
   );
 }

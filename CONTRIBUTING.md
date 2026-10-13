@@ -6,7 +6,7 @@ Thanks for wanting to help. This project is a local inventory web app (Express +
 
 Do **not** commit, upload, or paste:
 
-- `.env`, `secret.key`, or API keys (Gemini keys, `KEY`)
+- `.env`, `secret.key`, `admin.key`, or any key or PIN (Gemini keys, `ADMIN_KEY`)
 - Photos or rows from a real pantry / medicine inventory
 - Deploy SSH keys
 

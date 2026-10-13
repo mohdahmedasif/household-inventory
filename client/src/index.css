@@ -1193,7 +1193,25 @@ body {
 }
 
 .history-what {
+  display: grid;
   flex: 1;
+  gap: 2px;
+  min-width: 0;
+}
+
+.history-what > span {
+  color: var(--pantry-muted);
+  font-size: 13px;
+}
+
+.history-when {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+}
+
+.used-up.ant-collapse {
+  margin: 12px 0 0;
 }
 
 .history-when {
@@ -1742,5 +1760,224 @@ body {
 
   .overview-pair {
     grid-template-columns: 1fr;
+  }
+}
+
+/* ---------- Access: profile picker, PIN pad, profile bar ---------- */
+
+.profile-list {
+  display: grid;
+  gap: 8px;
+}
+
+.profile-list button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 16px;
+  border: 1px solid var(--pantry-border);
+  border-radius: var(--pantry-radius-sm);
+  background: var(--pantry-surface);
+  color: var(--pantry-ink);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+
+.profile-list button:hover {
+  border-color: var(--pantry-primary);
+  background: var(--pantry-primary-soft);
+}
+
+.profile-list button.add {
+  border-style: dashed;
+  color: var(--pantry-muted);
+  font-weight: 500;
+}
+
+.pin-dots {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  min-height: 16px;
+}
+
+.pin-dots span {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--pantry-border-strong);
+  border-radius: 50%;
+}
+
+.pin-dots span.filled {
+  border-color: var(--pantry-primary);
+  background: var(--pantry-primary);
+}
+
+.pin-status {
+  min-height: 22px;
+  margin: 12px 0 14px;
+  color: var(--pantry-muted);
+  text-align: center;
+}
+
+.pin-status.error {
+  color: var(--pantry-danger);
+  font-weight: 600;
+}
+
+.pin-pad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.pin-pad button {
+  height: 58px;
+  border: 1px solid var(--pantry-border);
+  border-radius: var(--pantry-radius-sm);
+  background: var(--pantry-surface);
+  color: var(--pantry-ink);
+  font-family: var(--font-display);
+  font-size: 24px;
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: background 100ms ease;
+}
+
+.pin-pad button:active:not(:disabled) {
+  background: var(--pantry-primary-soft);
+}
+
+.pin-pad button.quiet {
+  border-color: transparent;
+  background: transparent;
+  font-size: 20px;
+}
+
+.pin-pad button.go {
+  border-color: transparent;
+  background: var(--pantry-primary);
+  color: var(--pantry-on-primary);
+  font-family: var(--font-body);
+  font-size: 16px;
+}
+
+.pin-pad button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.pin-links {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 10px;
+}
+
+.profile-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 6px;
+  margin-top: 10px;
+  padding: 10px 12px 0;
+  border-top: 1px solid var(--pantry-border);
+}
+
+.profile-name {
+  display: flex;
+  flex: 1 1 100%;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+button.more-link {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* ---------- Pantry on a phone: one compact row per product ---------- */
+
+@media (max-width: 599px) {
+  .item-grid {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .item-card {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 2px 12px;
+    min-height: 0;
+    padding: 10px 14px;
+    border-radius: var(--pantry-radius-sm);
+  }
+
+  .item-card::before {
+    inset: 0 auto 0 0;
+    width: 3px;
+    height: auto;
+  }
+
+  .item-card-top,
+  .item-card > div:not([class]) {
+    grid-column: 1;
+    min-width: 0;
+  }
+
+  .item-card-category {
+    font-size: 11px;
+  }
+
+  .item-card-title {
+    font-size: 16px;
+    -webkit-line-clamp: 1;
+  }
+
+  .item-card-brand {
+    margin-top: 0;
+    font-size: 12px;
+  }
+
+  .item-card .purchase-badge,
+  .item-card .note-chips,
+  .item-card-notes,
+  .item-card .on-hand-label {
+    display: none;
+  }
+
+  .item-card-footer {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+    margin: 0;
+    padding: 0;
+    border-top: 0;
+  }
+
+  .item-card .on-hand-value {
+    font-size: 22px;
+  }
+
+  .item-card .expiry-pill {
+    padding: 2px 8px;
+    font-size: 11px;
   }
 }

@@ -1,10 +1,8 @@
-import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import express from "express";
-import { createDb, getSettings } from "./db.js";
+import { createApp } from "./app.js";
+import { loadAdminKey } from "./auth.js";
 import { loadDotEnv } from "./env.js";
-import { createRouter } from "./routes.js";
 
 loadDotEnv();
 
@@ -14,53 +12,14 @@ const PORT = Number(process.env.PORT) || 3000;
 const HOST = "0.0.0.0";
 // A "data" folder beside the server: <repo>/data normally, /data in the Docker image.
 const DATA_DIR = path.join(ROOT, "..", "data");
-const DIST_DIR = path.join(ROOT, "dist");
-const API_KEY = (process.env.KEY || "").trim();
 
-const db = createDb(path.join(DATA_DIR, "inventory.sqlite"));
-const app = express();
-app.disable("x-powered-by");
-app.use(express.json({ limit: "2mb" }));
-
-app.get("/api/health", (_req, res) => {
-  res.json({ ok: true });
-});
-
-// Public, so the unlock screen can show the app's name before a key is entered.
-app.get("/api/auth", (_req, res) => {
-  const { app_name, app_tagline } = getSettings(db);
-  res.json({ required: Boolean(API_KEY), app_name, app_tagline });
-});
-
-app.use("/api", (req, res, next) => {
-  if (!API_KEY) return next();
-  const header = String(req.headers.authorization || "");
-  const bearer = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
-  const alt = String(req.headers["x-api-key"] || "").trim();
-  if (bearer === API_KEY || alt === API_KEY) return next();
-  res.status(401).json({ error: "Unauthorized" });
-});
-
-app.use("/api", createRouter(db));
-
-if (fs.existsSync(DIST_DIR)) {
-  app.use(express.static(DIST_DIR));
-  app.get("*", (req, res, next) => {
-    if (req.path.startsWith("/api")) return next();
-    res.sendFile(path.join(DIST_DIR, "index.html"));
-  });
-}
-
-app.use((err, _req, res, _next) => {
-  const status = Number(err.status || err.statusCode || 500);
-  if (status >= 500) console.error(err);
-  res.status(status).json({ error: err.message || "Unexpected error" });
+const { app } = createApp({
+  dataDir: DATA_DIR,
+  distDir: path.join(ROOT, "dist"),
+  adminKey: loadAdminKey(DATA_DIR),
 });
 
 app.listen(PORT, HOST, () => {
   console.log(`Inventory API listening on http://${HOST}:${PORT}`);
   console.log(`SQLite: ${path.join(DATA_DIR, "inventory.sqlite")}`);
-  if (!API_KEY) {
-    console.warn("KEY is not set — the API is open on this host.");
-  }
 });

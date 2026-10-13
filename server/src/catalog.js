@@ -71,6 +71,7 @@ export const SETTINGS_SCHEMA = {
   extract_language: { type: "text", initial: "English" },
   gemini_model: { type: "text", initial: "gemini-flash-latest" },
   gemini_fallback_model: { type: "text", initial: "gemini-flash-lite-latest" },
+  auto_lock_minutes: { type: "int", min: 1, max: 240, initial: 5 },
   app_name: { type: "text", initial: "Stocked" },
   app_tagline: { type: "text", initial: "Household inventory" },
 };
