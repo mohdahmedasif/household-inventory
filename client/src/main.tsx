@@ -19,6 +19,14 @@ const BORDER_STRONG = token("border-strong");
 const BG_DEEP = token("bg-deep");
 const FOCUS_RING = `0 0 0 3px ${tint("primary", 14)}`;
 
+// Browsers only offer service workers over HTTPS or on localhost; elsewhere
+// the app simply runs without one.
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+  });
+}
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ConfigProvider

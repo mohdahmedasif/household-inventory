@@ -112,6 +112,14 @@ Two layers keep a stranger who finds the URL from seeing or guessing anything.
 
 The PIN is a lock on the app's door, not encryption: the database file on the server is not encrypted.
 
+## Install on a phone or desktop
+
+Stocked is an installable web app. Over HTTPS (or on `localhost`), browsers offer **Install app** / **Add to Home Screen**; it then opens full screen with its own icon.
+
+- The app's own files are kept on the device, so it opens instantly and still opens with no connection, where it says it cannot reach the server and reconnects by itself.
+- Inventory data is never stored on the device: reading or changing anything needs the server.
+- Over plain HTTP on a home network, browsers do not allow installing or offline start. An iPhone can still use Safari → Share → Add to Home Screen for a full-screen shortcut.
+
 ## Data model
 
 | Entity | Meaning |

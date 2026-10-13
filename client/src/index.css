@@ -1429,6 +1429,10 @@ body {
   color: var(--pantry-muted);
 }
 
+.login-card .ant-card-head-title {
+  text-align: center;
+}
+
 .login-card {
   width: 100%;
   box-shadow: var(--pantry-shadow-md) !important;

@@ -37,6 +37,25 @@ function Shell({ brand, children }: { brand: Brand; children: ReactNode }) {
   );
 }
 
+/** The app's own files loaded, but its server cannot be reached. */
+export function OfflineScreen({ brand, onRetry }: { brand: Brand; onRetry: () => void }) {
+  useEffect(() => {
+    window.addEventListener("online", onRetry);
+    return () => window.removeEventListener("online", onRetry);
+  }, [onRetry]);
+
+  return (
+    <Shell brand={brand}>
+      <Card className="login-card" title="Can’t reach the server">
+        <p className="pin-status">Check your connection, or that the server is running.</p>
+        <Button type="primary" size="large" block onClick={onRetry}>
+          Try again
+        </Button>
+      </Card>
+    </Shell>
+  );
+}
+
 export function PairScreen({ brand, onPaired }: { brand: Brand; onPaired: () => void }) {
   const { message } = AntdApp.useApp();
   const [busy, setBusy] = useState(false);

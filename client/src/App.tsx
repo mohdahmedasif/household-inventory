@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { App as AntdApp } from "antd";
 import {
+  ApiError,
   fetchAccessStatus,
   fetchProfiles,
   fetchSettings,
@@ -9,7 +10,13 @@ import {
   onAccessLost,
   type Profile,
 } from "./api";
-import { PairScreen, PinScreen, ProfilePicker, type Brand } from "./access/AccessScreens";
+import {
+  OfflineScreen,
+  PairScreen,
+  PinScreen,
+  ProfilePicker,
+  type Brand,
+} from "./access/AccessScreens";
 import { AccessContext, type Access } from "./access/context";
 import { applySettings, settings } from "./settings";
 import AppLayout from "./layout/AppLayout";
@@ -24,6 +31,7 @@ import StatsPage from "./pages/StatsPage";
 // pair (first time only) → pick a profile → PIN → app
 type Stage =
   | { kind: "loading" }
+  | { kind: "offline" }
   | { kind: "pair" }
   | { kind: "pick" }
   | { kind: "pin"; profile: Profile }
@@ -34,6 +42,7 @@ type Stage =
 const LAST_PROFILE = "inventory.lastProfile";
 const HIDDEN_AT = "inventory.hiddenAt";
 const AUTO_LOCK_MINUTES = "inventory.autoLockMinutes";
+const BRAND = "inventory.brand";
 
 function recall<T>(key: string): T | null {
   try {
@@ -52,7 +61,9 @@ function awayTooLong(): boolean {
 export default function App() {
   const { message } = AntdApp.useApp();
   const [stage, setStage] = useState<Stage>({ kind: "loading" });
-  const [brand, setBrand] = useState<Brand>({ app_name: "", app_tagline: "", pin_min: 0, pin_max: 0 });
+  const [brand, setBrand] = useState<Brand>(
+    () => recall<Brand>(BRAND) ?? { app_name: "", app_tagline: "", pin_min: 0, pin_max: 0 },
+  );
   const stageRef = useRef(stage);
   stageRef.current = stage;
 
@@ -83,6 +94,7 @@ export default function App() {
     try {
       const status = await fetchAccessStatus();
       setBrand(status);
+      localStorage.setItem(BRAND, JSON.stringify(status));
       document.title = [status.app_name, status.app_tagline].filter(Boolean).join(" · ");
       if (!status.paired) return setStage({ kind: "pair" });
       if (status.profile) {
@@ -94,7 +106,9 @@ export default function App() {
       const known = profiles.find((profile) => profile.profile_id === last?.profile_id);
       setStage(known ? { kind: "pin", profile: known } : { kind: "pick" });
     } catch (err) {
-      message.error(err instanceof Error ? err.message : "Could not reach the app");
+      // No answer at all (rather than an error answer) means the server is out of reach.
+      if (err instanceof ApiError) message.error(err.message);
+      else setStage({ kind: "offline" });
     }
   }, [enterApp, lock, message]);
 
@@ -158,6 +172,7 @@ export default function App() {
   }, [unlockedProfile, lock, start]);
 
   if (stage.kind === "loading") return null;
+  if (stage.kind === "offline") return <OfflineScreen brand={brand} onRetry={() => void start()} />;
   if (stage.kind === "pair") return <PairScreen brand={brand} onPaired={() => void start()} />;
   if (stage.kind === "pick") {
     return <ProfilePicker brand={brand} onPick={(profile) => setStage({ kind: "pin", profile })} />;
