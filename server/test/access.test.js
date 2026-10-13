@@ -22,10 +22,10 @@ after(() => {
   }
 });
 
-async function startApp() {
+async function startApp(adminKey = ADMIN_KEY) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "inventory-test-"));
   const clock = { now: Date.now() };
-  const { app, db, stores } = createApp({ dataDir: dir, adminKey: ADMIN_KEY, now: () => clock.now });
+  const { app, db, stores } = createApp({ dataDir: dir, adminKey, now: () => clock.now });
   const server = await new Promise((resolve) => {
     const listening = app.listen(0, "127.0.0.1", () => resolve(listening));
   });
@@ -127,6 +127,20 @@ test("a wrong admin key does not pair, and a made-up device cookie is rejected",
   const forged = await b.get("/profiles");
   assert.equal(forged.status, 403);
   assert.equal(forged.body.code, "unpaired");
+});
+
+test("with no admin key set, nothing can be paired, not even with an empty key", async () => {
+  const { base, dir } = await startApp("");
+  const b = browser(base);
+  for (const admin_key of ["", "anything", undefined]) {
+    const res = await b.post("/auth/pair", { admin_key });
+    assert.equal(res.status, 503);
+    assert.equal(res.body.code, "no_admin_key");
+  }
+  assert.equal(b.jar.size, 0);
+  assert.equal((await b.get("/profiles")).status, 403);
+  // The server never writes a key of its own to disk.
+  assert.ok(!fs.readdirSync(dir).some((name) => /admin/i.test(name)));
 });
 
 test("pairing is rate limited per address", async () => {

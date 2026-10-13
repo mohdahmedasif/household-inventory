@@ -46,6 +46,7 @@ In **production / Docker**, Express serves the built SPA and API from one proces
 ```bash
 git clone https://github.com/mohdahmedasif/household-inventory.git
 cd household-inventory
+cp .env.example .env          # then set ADMIN_KEY (Windows: copy .env.example .env)
 npm install
 npm run install:all
 npm run dev
@@ -60,7 +61,7 @@ npm run build
 npm start
 ```
 
-Open **http://127.0.0.1:3000**. The first visit asks for the admin key, which the server writes to `data/admin.key`.
+Open **http://127.0.0.1:3000**. The first visit asks for the admin key you set as `ADMIN_KEY`.
 
 ### Docker
 
@@ -68,23 +69,19 @@ Open **http://127.0.0.1:3000**. The first visit asks for the admin key, which th
 docker compose up -d --build
 ```
 
-On first start the server creates an admin key. Read it with:
-
-```bash
-docker compose exec inventory cat /data/admin.key
-```
+Set `ADMIN_KEY` in `.env` first; the first visit asks for it.
 
 - App: **http://127.0.0.1:3000** (or the `PORT` you set)
 - Data: Docker volume `household-inventory-data`
 
 ## Configuration
 
-The app reads two environment variables, both optional. Copy [`.env.example`](.env.example) → `.env` to set them.
+The app reads two environment variables. Copy [`.env.example`](.env.example) → `.env` to set them.
 
 | Variable | Purpose |
 |----------|---------|
 | `PORT` | The port the app is opened on (default `3000`) |
-| `ADMIN_KEY` | Pairs a new browser and resets a forgotten PIN. If unset, a random one is written to `admin.key` in the data directory on first start. |
+| `ADMIN_KEY` | Required. Pairs a new browser and resets a forgotten PIN. Without it no device can be paired. |
 
 Everything else is set in the app and stored in the database:
 
@@ -93,7 +90,7 @@ Everything else is set in the app and stored in the database:
 
 Gemini API keys are stored encrypted. The encryption key is the `secret.key` file in the data directory; without it, saved keys cannot be read and must be entered again.
 
-Never commit `.env`, `secret.key`, `admin.key`, a database, or a backup file. Don't paste keys or PINs into issues or PRs.
+Never commit `.env`, `secret.key`, a database, or a backup file. Don't paste keys or PINs into issues or PRs.
 
 ## Access
 
@@ -150,7 +147,7 @@ Rows with the same name + category merge into one product; each row becomes a ba
 ```bash
 git clone https://github.com/mohdahmedasif/household-inventory.git
 cd household-inventory
-cp .env.example .env   # optional: set ADMIN_KEY
+cp .env.example .env   # set ADMIN_KEY
 docker compose up -d --build
 ```
 

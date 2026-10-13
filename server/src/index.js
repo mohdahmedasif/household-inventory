@@ -16,10 +16,13 @@ const DATA_DIR = path.join(ROOT, "..", "data");
 const { app } = createApp({
   dataDir: DATA_DIR,
   distDir: path.join(ROOT, "dist"),
-  adminKey: loadAdminKey(DATA_DIR),
+  adminKey: loadAdminKey(),
 });
 
 app.listen(PORT, HOST, () => {
   console.log(`Inventory API listening on http://${HOST}:${PORT}`);
   console.log(`SQLite: ${path.join(DATA_DIR, "inventory.sqlite")}`);
+  if (!loadAdminKey()) {
+    console.warn("ADMIN_KEY is not set: no device can be paired until it is added to .env.");
+  }
 });

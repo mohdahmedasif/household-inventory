@@ -1,6 +1,4 @@
 import crypto from "node:crypto";
-import fs from "node:fs";
-import path from "node:path";
 import { Router } from "express";
 import { runAs } from "./actor.js";
 import { config } from "./config.js";
@@ -11,20 +9,12 @@ import { config } from "./config.js";
 
 const DEVICE_COOKIE = "inv_device";
 const SESSION_COOKIE = "inv_session";
-const ADMIN_KEY_FILE = "admin.key";
 const MINUTE = 60 * 1000;
 const DAY = 24 * 60 * MINUTE;
 
-export function loadAdminKey(dataDir) {
-  const fromEnv = process.env.ADMIN_KEY?.trim();
-  if (fromEnv) return fromEnv;
-  const file = path.join(dataDir, ADMIN_KEY_FILE);
-  if (!fs.existsSync(file)) {
-    fs.mkdirSync(dataDir, { recursive: true });
-    fs.writeFileSync(file, `${crypto.randomBytes(12).toString("base64url")}\n`, { mode: 0o600 });
-    console.log(`Admin key created. Read it from: ${file}`);
-  }
-  return fs.readFileSync(file, "utf8").trim();
+/** The admin key comes only from the ADMIN_KEY environment variable. */
+export function loadAdminKey() {
+  return process.env.ADMIN_KEY?.trim() ?? "";
 }
 
 const sha256 = (value) => crypto.createHash("sha256").update(String(value)).digest("hex");
@@ -96,6 +86,19 @@ export function createAuth(
   const iso = (ms) => new Date(ms).toISOString();
   const tooMany = (res) =>
     fail(res, 429, "rate_limited", "Too many attempts. Wait a few minutes and try again.");
+
+  // With no admin key set, nothing can be paired and no PIN can be reset.
+  function adminKeyAccepted(req, res) {
+    if (!adminKey) {
+      fail(res, 503, "no_admin_key", "ADMIN_KEY is not set on the server. Add it to .env and restart.");
+      return false;
+    }
+    if (!sameSecret(String(req.body?.admin_key ?? ""), adminKey)) {
+      fail(res, 401, "wrong_admin_key", "That admin key is not correct.");
+      return false;
+    }
+    return true;
+  }
 
   const findDevice = (req) => {
     const token = readCookies(req)[DEVICE_COOKIE];
@@ -172,9 +175,7 @@ export function createAuth(
 
   publicRouter.post("/auth/pair", (req, res) => {
     if (!pairLimit(req.ip)) return tooMany(res);
-    if (!sameSecret(String(req.body?.admin_key ?? ""), adminKey)) {
-      return fail(res, 401, "wrong_admin_key", "That admin key is not correct.");
-    }
+    if (!adminKeyAccepted(req, res)) return;
     const token = newToken();
     db.prepare("INSERT INTO devices (token_hash, label, created_at) VALUES (?, ?, ?)").run(
       sha256(token),
@@ -246,9 +247,7 @@ export function createAuth(
   // A forgotten PIN is replaced with the admin key; everyone signed in to that profile is signed out.
   deviceRouter.post("/profiles/:id/reset-pin", (req, res) => {
     if (!pairLimit(req.ip)) return tooMany(res);
-    if (!sameSecret(String(req.body?.admin_key ?? ""), adminKey)) {
-      return fail(res, 401, "wrong_admin_key", "That admin key is not correct.");
-    }
+    if (!adminKeyAccepted(req, res)) return;
     if (!validPin(req.body?.pin)) return fail(res, 400, "invalid", pinRule());
     const profileId = Number(req.params.id);
     const { salt, hash } = hashPin(req.body.pin);
