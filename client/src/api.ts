@@ -181,7 +181,13 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers.set("Content-Type", "application/json");
   }
 
-  const res = await fetch(path, { ...init, headers });
+  let res: Response;
+  try {
+    res = await fetch(path, { ...init, headers });
+  } catch {
+    // The browser got no answer at all: the server is down or the connection dropped.
+    throw new Error("Could not reach the server. Check the connection and try again.");
+  }
   const text = await res.text();
   let data: Record<string, unknown> | null = null;
   try {
@@ -510,9 +516,9 @@ export function fetchReportRows() {
   return request<{ items: ReportRow[] }>("/api/items");
 }
 
-export function extractFromImage(file: File, caption = "") {
+export function extractFromImages(files: File[], caption = "") {
   const body = new FormData();
-  body.append("image", file);
+  for (const file of files) body.append("images", file);
   if (caption.trim()) body.append("caption", caption.trim());
   return request<{ item: ProductCreateInput }>("/api/extract", {
     method: "POST",

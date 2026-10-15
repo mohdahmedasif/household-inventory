@@ -9,6 +9,7 @@ import {
   Collapse,
   DatePicker,
   Form,
+  Grid,
   Input,
   InputNumber,
   Modal,
@@ -24,6 +25,7 @@ import {
   ArrowLeftOutlined,
   CameraOutlined,
   ClockCircleOutlined,
+  CloseOutlined,
   CopyOutlined,
   DeleteOutlined,
   EditOutlined,
@@ -32,6 +34,7 @@ import {
   ThunderboltOutlined,
 } from "@ant-design/icons";
 import PageActions, { usePageTitle } from "../layout/PageActions";
+import { shrinkPhoto } from "../shrinkPhoto";
 import dayjs from "dayjs";
 import type { Dayjs } from "dayjs";
 import type { ColumnsType } from "antd/es/table";
@@ -41,7 +44,7 @@ import {
   createProduct,
   deleteBatch,
   deleteProduct,
-  extractFromImage,
+  extractFromImages,
   fetchCatalog,
   fetchCompanies,
   fetchProduct,
@@ -87,6 +90,11 @@ type BatchForm = {
   acquired?: Dayjs | null;
 };
 
+type Photo = { id: string; file: File; url: string };
+
+// Matches the server's limit on photos read together.
+const maxPhotos = 6;
+
 type NewProductForm = ProductCreateInput & {
   expiry?: Dayjs | null;
 };
@@ -120,8 +128,9 @@ export default function ItemFormPage() {
   const [mergeTarget, setMergeTarget] = useState<number | undefined>();
   const [mergeOptions, setMergeOptions] = useState<ProductSummary[]>([]);
   const [mergeBusy, setMergeBusy] = useState(false);
-  const [photoFile, setPhotoFile] = useState<File | null>(null);
-  const [photoPreview, setPhotoPreview] = useState("");
+  const [photos, setPhotos] = useState<Photo[]>([]);
+  const photosRef = useRef<Photo[]>([]);
+  const readTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [photoCaption, setPhotoCaption] = useState("");
   const [extracting, setExtracting] = useState(false);
   const [events, setEvents] = useState<StockEvent[]>([]);
@@ -129,43 +138,73 @@ export default function ItemFormPage() {
   const [moreOpen, setMoreOpen] = useState(false);
   const addAnother = useRef(false);
   usePageTitle(editing ? product?.name : undefined);
+  // Below tablet width each purchase is a card instead of a table row.
+  const isPhone = !Grid.useBreakpoint().md;
 
-  useEffect(() => {
-    return () => {
-      if (photoPreview) URL.revokeObjectURL(photoPreview);
-    };
-  }, [photoPreview]);
+  function updatePhotos(next: Photo[]) {
+    photosRef.current = next;
+    setPhotos(next);
+  }
 
-  function pickPhoto(file: File) {
-    if (photoPreview) URL.revokeObjectURL(photoPreview);
-    setPhotoFile(file);
-    setPhotoPreview(URL.createObjectURL(file));
-    void onExtractPhoto(file);
+  useEffect(
+    () => () => {
+      for (const photo of photosRef.current) URL.revokeObjectURL(photo.url);
+      if (readTimer.current) clearTimeout(readTimer.current);
+    },
+    [],
+  );
+
+  // Photos are scaled down on the device, then read together a moment after
+  // the last one is added, so taking several in a row sends one request.
+  async function addPhotos(files: File[]) {
+    const room = maxPhotos - photosRef.current.length;
+    if (room <= 0) {
+      message.warning(`Up to ${maxPhotos} photos per product`);
+      return;
+    }
+    const shrunk = await Promise.all(files.slice(0, room).map(shrinkPhoto));
+    updatePhotos([
+      ...photosRef.current,
+      ...shrunk.map((file) => ({ id: `${Date.now()}-${Math.random()}`, file, url: URL.createObjectURL(file) })),
+    ]);
+    if (readTimer.current) clearTimeout(readTimer.current);
+    readTimer.current = setTimeout(() => void onExtractPhoto(), 1200);
+  }
+
+  function removePhoto(id: string) {
+    const photo = photosRef.current.find((entry) => entry.id === id);
+    if (photo) URL.revokeObjectURL(photo.url);
+    updatePhotos(photosRef.current.filter((entry) => entry.id !== id));
   }
 
   function clearPhoto() {
-    if (photoPreview) URL.revokeObjectURL(photoPreview);
-    setPhotoFile(null);
-    setPhotoPreview("");
+    for (const photo of photosRef.current) URL.revokeObjectURL(photo.url);
+    updatePhotos([]);
   }
 
-  async function onExtractPhoto(file: File | null = photoFile) {
-    if (!file) {
-      message.warning("Choose a photo first");
+  async function onExtractPhoto() {
+    if (readTimer.current) clearTimeout(readTimer.current);
+    const files = photosRef.current.map((photo) => photo.file);
+    if (!files.length) {
+      message.warning("Add a photo first");
       return;
     }
     setExtracting(true);
     try {
-      const { item } = await extractFromImage(file, photoCaption);
+      const { item } = await extractFromImages(files, photoCaption);
       newForm.setFieldsValue({
         ...item,
         expiry: item.expiry_date ? dayjs(item.expiry_date) : null,
       });
       lookupSimilar(item.name ?? "", item.category ?? "");
       setMoreOpen(Boolean(item.units_per_package || item.batch_notes));
-      message.success("Details filled from photo — review and save");
+      message.success(
+        files.length > 1
+          ? `Details filled from ${files.length} photos — review and save`
+          : "Details filled from photo — review and save",
+      );
     } catch (err) {
-      message.error(err instanceof Error ? err.message : "Could not read that photo");
+      message.error(err instanceof Error ? err.message : "Could not read the photos");
     } finally {
       setExtracting(false);
     }
@@ -483,6 +522,92 @@ export default function ItemFormPage() {
   const inStock = (product?.batches ?? []).filter((batch) => batch.package_count > 0);
   const usedUp = (product?.batches ?? []).filter((batch) => batch.package_count <= 0);
 
+  const countStepper = (row: Batch) => (
+    <span className="batch-stepper">
+      <Button
+        size="small"
+        shape="circle"
+        disabled={row.package_count <= 0}
+        onClick={() => void onCount(row, -1)}
+        aria-label="Use one from this purchase"
+      >
+        −
+      </Button>
+      <span>{row.package_count}</span>
+      <Button size="small" shape="circle" onClick={() => void onCount(row, 1)} aria-label="Add one to this purchase">
+        +
+      </Button>
+    </span>
+  );
+
+  const noteEditor = (row: Batch) => (
+    <Typography.Text
+      className={row.notes ? "batch-note" : "batch-note empty"}
+      editable={{
+        tooltip: "Edit note",
+        text: row.notes,
+        onChange: (next) => void onSaveNote(row, next),
+      }}
+    >
+      {row.notes || "Add note"}
+    </Typography.Text>
+  );
+
+  const expiryPill = (value: string) => (
+    <span className={`expiry-pill ${expiryTone(value)}`} title={value || undefined}>
+      <ClockCircleOutlined />
+      {expiryLabel(value)}
+    </span>
+  );
+
+  const batchActions = (row: Batch) => (
+    <Space size={2}>
+      <Tooltip title="Copy as new purchase">
+        <Button type="text" icon={<CopyOutlined />} aria-label="Copy as new purchase" onClick={() => openCopyBatch(row)} />
+      </Tooltip>
+      <Tooltip title="Edit purchase">
+        <Button type="text" icon={<EditOutlined />} aria-label="Edit purchase" onClick={() => openEditBatch(row)} />
+      </Tooltip>
+      <Popconfirm
+        title="Delete this purchase batch?"
+        description="If it is the last batch, the product is removed too."
+        onConfirm={() => void onDeleteBatch(row)}
+      >
+        <Button type="text" danger icon={<DeleteOutlined />} aria-label="Delete purchase" />
+      </Popconfirm>
+    </Space>
+  );
+
+  const batchCards = (rows: Batch[], empty?: string) =>
+    rows.length ? (
+      <div className="batch-cards">
+        {rows.map((row) => (
+          <div key={row.batch_id} className="batch-card">
+            <div className="batch-card-head">
+              <div className="batch-card-title">
+                <strong>{row.company || "No company"}</strong>
+                <span>
+                  {[row.package_type, sizeLabel(row), row.location].filter(Boolean).join(" · ")}
+                  <span className="batch-id"> · #{row.batch_id}</span>
+                </span>
+              </div>
+              {countStepper(row)}
+            </div>
+            <div className="batch-card-meta">
+              {expiryPill(row.expiry_date)}
+              {row.acquired_on ? <span>Bought {row.acquired_on}</span> : null}
+            </div>
+            <div className="batch-card-foot">
+              {noteEditor(row)}
+              {batchActions(row)}
+            </div>
+          </div>
+        ))}
+      </div>
+    ) : empty ? (
+      <p className="overview-empty">{empty}</p>
+    ) : null;
+
   const batchColumns: ColumnsType<Batch> = [
     {
       title: "#",
@@ -509,56 +634,19 @@ export default function ItemFormPage() {
       title: "Count",
       dataIndex: "package_count",
       width: 140,
-      render: (count: number, row) => (
-        <span className="batch-stepper">
-          <Button
-            size="small"
-            shape="circle"
-            disabled={count <= 0}
-            onClick={() => void onCount(row, -1)}
-            aria-label="Use one from this purchase"
-          >
-            −
-          </Button>
-          <span>{count}</span>
-          <Button
-            size="small"
-            shape="circle"
-            onClick={() => void onCount(row, 1)}
-            aria-label="Add one to this purchase"
-          >
-            +
-          </Button>
-        </span>
-      ),
+      render: (_: number, row) => countStepper(row),
     },
     {
       title: "Note",
       dataIndex: "notes",
       width: 190,
-      render: (value: string, row) => (
-        <Typography.Text
-          className={value ? "batch-note" : "batch-note empty"}
-          editable={{
-            tooltip: "Edit note",
-            text: value,
-            onChange: (next) => void onSaveNote(row, next),
-          }}
-        >
-          {value || "Add note"}
-        </Typography.Text>
-      ),
+      render: (_: string, row) => noteEditor(row),
     },
     {
       title: "Expiry",
       dataIndex: "expiry_date",
       width: 150,
-      render: (value: string) => (
-        <span className={`expiry-pill ${expiryTone(value)}`} title={value || undefined}>
-          <ClockCircleOutlined />
-          {expiryLabel(value)}
-        </span>
-      ),
+      render: (value: string) => expiryPill(value),
     },
     {
       title: "Acquired",
@@ -571,28 +659,7 @@ export default function ItemFormPage() {
       key: "actions",
       width: 132,
       align: "right",
-      render: (_: unknown, row) => (
-        <Space size={2}>
-          <Tooltip title="Copy as new purchase">
-            <Button
-              type="text"
-              icon={<CopyOutlined />}
-              aria-label="Copy as new purchase"
-              onClick={() => openCopyBatch(row)}
-            />
-          </Tooltip>
-          <Tooltip title="Edit purchase">
-            <Button type="text" icon={<EditOutlined />} onClick={() => openEditBatch(row)} />
-          </Tooltip>
-          <Popconfirm
-            title="Delete this purchase batch?"
-            description="If it is the last batch, the product is removed too."
-            onConfirm={() => void onDeleteBatch(row)}
-          >
-            <Button type="text" danger icon={<DeleteOutlined />} aria-label="Delete purchase" />
-          </Popconfirm>
-        </Space>
-      ),
+      render: (_: unknown, row) => batchActions(row),
     },
   ];
 
@@ -640,31 +707,61 @@ export default function ItemFormPage() {
               <p>Gemini reads the photo and fills the fields below for review.</p>
             </div>
             <div className="extract-zone">
-              <Upload.Dragger
-                accept="image/jpeg,image/png,image/webp"
-                multiple={false}
-                showUploadList={false}
-                disabled={extracting}
-                beforeUpload={(file) => {
-                  pickPhoto(file);
-                  return false;
-                }}
-              >
-                {photoPreview ? (
-                  <div className="extract-preview">
-                    <img src={photoPreview} alt="Selected label" />
-                    <span>{photoFile?.name}</span>
+              <div className="photo-area">
+                {photos.length ? (
+                  <div className="photo-strip">
+                    {photos.map((photo, index) => (
+                      <div key={photo.id} className="photo-thumb">
+                        <img src={photo.url} alt={`Photo ${index + 1}`} />
+                        <button
+                          type="button"
+                          aria-label={`Remove photo ${index + 1}`}
+                          disabled={extracting}
+                          onClick={() => removePhoto(photo.id)}
+                        >
+                          <CloseOutlined />
+                        </button>
+                      </div>
+                    ))}
+                    {photos.length < maxPhotos ? (
+                      <Upload
+                        accept="image/*"
+                        multiple
+                        showUploadList={false}
+                        disabled={extracting}
+                        beforeUpload={(file, fileList) => {
+                          if (file === fileList[fileList.length - 1]) void addPhotos(fileList);
+                          return false;
+                        }}
+                      >
+                        <button type="button" className="photo-add" disabled={extracting}>
+                          <PlusOutlined />
+                          Add
+                        </button>
+                      </Upload>
+                    ) : null}
                   </div>
                 ) : (
-                  <>
+                  <Upload.Dragger
+                    accept="image/*"
+                    multiple
+                    showUploadList={false}
+                    disabled={extracting}
+                    beforeUpload={(file, fileList) => {
+                      if (file === fileList[fileList.length - 1]) void addPhotos(fileList);
+                      return false;
+                    }}
+                  >
                     <p className="ant-upload-drag-icon">
                       <CameraOutlined />
                     </p>
-                    <p className="ant-upload-text">Choose or drop a product photo</p>
-                    <p className="ant-upload-hint">It is read as soon as you pick it</p>
-                  </>
+                    <p className="ant-upload-text">Choose or drop product photos</p>
+                    <p className="ant-upload-hint">
+                      Up to {maxPhotos}: front, back, the expiry date. They are read together.
+                    </p>
+                  </Upload.Dragger>
                 )}
-              </Upload.Dragger>
+              </div>
               <div className="extract-controls">
                 <Input.TextArea
                   rows={3}
@@ -675,13 +772,13 @@ export default function ItemFormPage() {
                 />
                 <div className="extract-actions">
                   <Upload
-                    accept="image/jpeg,image/png,image/webp"
+                    accept="image/*"
                     capture="environment"
                     multiple={false}
                     showUploadList={false}
-                    disabled={extracting}
+                    disabled={extracting || photos.length >= maxPhotos}
                     beforeUpload={(file) => {
-                      pickPhoto(file);
+                      void addPhotos([file]);
                       return false;
                     }}
                   >
@@ -690,12 +787,13 @@ export default function ItemFormPage() {
                       size="large"
                       icon={<CameraOutlined />}
                       loading={extracting}
+                      disabled={photos.length >= maxPhotos}
                       block
                     >
-                      {extracting ? "Reading…" : "Take photo"}
+                      {extracting ? "Reading…" : photos.length ? "Take another photo" : "Take photo"}
                     </Button>
                   </Upload>
-                  {photoFile ? (
+                  {photos.length ? (
                     <Button
                       size="large"
                       icon={<ThunderboltOutlined />}
@@ -703,12 +801,12 @@ export default function ItemFormPage() {
                       onClick={() => void onExtractPhoto()}
                       block
                     >
-                      Read again
+                      {photos.length > 1 ? `Read ${photos.length} photos` : "Read again"}
                     </Button>
                   ) : null}
-                  {photoFile ? (
+                  {photos.length ? (
                     <Button size="large" disabled={extracting} onClick={clearPhoto} block>
-                      Clear photo
+                      Clear photos
                     </Button>
                   ) : null}
                 </div>
@@ -945,15 +1043,19 @@ export default function ItemFormPage() {
           </Button>
         }
       >
-        <Table
-          size="middle"
-          rowKey="batch_id"
-          columns={batchColumns}
-          dataSource={inStock}
-          locale={{ emptyText: "Nothing in stock" }}
-          pagination={false}
-          scroll={{ x: 1000 }}
-        />
+        {isPhone ? (
+          batchCards(inStock, "Nothing in stock")
+        ) : (
+          <Table
+            size="middle"
+            rowKey="batch_id"
+            columns={batchColumns}
+            dataSource={inStock}
+            locale={{ emptyText: "Nothing in stock" }}
+            pagination={false}
+            scroll={{ x: 1000 }}
+          />
+        )}
         {usedUp.length ? (
           <Collapse
             ghost
@@ -962,16 +1064,18 @@ export default function ItemFormPage() {
               {
                 key: "used",
                 label: `Used up (${usedUp.length})`,
-                children: (
-                <Table
-                  showHeader={false}
-          size="middle"
-          rowKey="batch_id"
-          columns={batchColumns}
-          dataSource={usedUp}
-          pagination={false}
-          scroll={{ x: 1000 }}
-        />
+                children: isPhone ? (
+                  batchCards(usedUp)
+                ) : (
+                  <Table
+                    showHeader={false}
+                    size="middle"
+                    rowKey="batch_id"
+                    columns={batchColumns}
+                    dataSource={usedUp}
+                    pagination={false}
+                    scroll={{ x: 1000 }}
+                  />
                 ),
               },
             ]}

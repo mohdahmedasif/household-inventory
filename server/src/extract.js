@@ -181,8 +181,7 @@ export async function listGeminiModels(key) {
  * is told how each saved key did.
  */
 export async function extractItem({
-  imageBuffer,
-  mimeType = "image/jpeg",
+  images = [],
   caption = "",
   catalog,
   settings,
@@ -194,8 +193,8 @@ export async function extractItem({
     err.status = 503;
     throw err;
   }
-  if (!imageBuffer?.length) {
-    const err = new Error("Image is required.");
+  if (!images.length || images.some((image) => !image.buffer?.length)) {
+    const err = new Error("Add at least one photo.");
     err.status = 400;
     throw err;
   }
@@ -210,7 +209,11 @@ export async function extractItem({
     throw err;
   }
 
-  const promptBits = ["Extract the household inventory item from the provided input."];
+  const promptBits = [
+    images.length > 1
+      ? `These ${images.length} photos all show the same single product from different sides (front, back, label, expiry date). Combine what they show into one item.`
+      : "Extract the household inventory item from the provided input.",
+  ];
   const captionText = String(caption || "").trim();
   if (captionText) promptBits.push(`User text/caption:\n${captionText}`);
   else promptBits.push("No caption was provided; infer details from the image/label.");
@@ -220,12 +223,12 @@ export async function extractItem({
       {
         role: "user",
         parts: [
-          {
+          ...images.map((image) => ({
             inlineData: {
-              mimeType: mimeType || "image/jpeg",
-              data: Buffer.from(imageBuffer).toString("base64"),
+              mimeType: image.mimeType || "image/jpeg",
+              data: Buffer.from(image.buffer).toString("base64"),
             },
-          },
+          })),
           { text: promptBits.join("\n") },
         ],
       },

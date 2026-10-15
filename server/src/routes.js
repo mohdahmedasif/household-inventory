@@ -58,7 +58,7 @@ import {
 // Built per router so the size limit is read after .env has been loaded.
 const createUpload = () => multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: config.maxUploadBytes, files: 1 },
+  limits: { fileSize: config.maxUploadBytes, files: config.maxPhotos },
   fileFilter(_req, file, cb) {
     if (ALLOWED_IMAGE_TYPES.has(String(file.mimetype || "").toLowerCase())) {
       cb(null, true);
@@ -520,27 +520,48 @@ export function createRouter(db) {
 
   // --- Gemini extract (photo → draft product fields) ---
 
+  // Several photos of the same product (front, back, label, expiry) are read together.
+  const photoFields = upload.fields([
+    { name: "images", maxCount: config.maxPhotos },
+    { name: "image", maxCount: 1 },
+  ]);
+
+  function uploadProblem(err) {
+    const mb = Math.round(config.maxUploadBytes / (1024 * 1024));
+    if (err.code === "LIMIT_FILE_SIZE") return Object.assign(badRequest(`Each photo can be at most ${mb} MB.`), { status: 413 });
+    if (err.code === "LIMIT_FILE_COUNT" || err.code === "LIMIT_UNEXPECTED_FILE") {
+      return badRequest(`Send at most ${config.maxPhotos} photos at once.`);
+    }
+    return err;
+  }
+
   router.post("/extract", (req, res) => {
-    upload.single("image")(req, res, async (uploadErr) => {
+    photoFields(req, res, async (uploadErr) => {
       if (uploadErr) {
-        sendError(res, uploadErr);
+        const problem = uploadProblem(uploadErr);
+        console.warn(`Photo upload refused: ${problem.message}`);
+        sendError(res, problem);
         return;
       }
       try {
-        if (!req.file) throw badRequest("Image is required.");
+        const files = [...(req.files?.images ?? []), ...(req.files?.image ?? [])];
+        if (!files.length) throw badRequest("Add at least one photo.");
+        const started = Date.now();
+        const sizes = files.map((file) => `${Math.round(file.size / 1024)} KB`).join(", ");
         const catalog = getCatalog(db);
         const settings = getSettings(db);
         const item = await extractItem({
-          imageBuffer: req.file.buffer,
-          mimeType: req.file.mimetype,
+          images: files.map((file) => ({ buffer: file.buffer, mimeType: file.mimetype })),
           caption: String(req.body?.caption ?? ""),
           catalog,
           settings,
           apiKeys: readGeminiKeys(db),
           onKeyResult: (keyId, error) => noteGeminiKeyResult(db, keyId, error),
         });
+        console.log(`Photo read: ${files.length} photo(s) (${sizes}) in ${Math.round((Date.now() - started) / 1000)}s`);
         res.json({ item });
       } catch (err) {
+        console.warn(`Photo read failed (${err.status || 500}): ${err.message}`);
         sendError(res, err);
       }
     });

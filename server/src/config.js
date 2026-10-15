@@ -12,6 +12,8 @@ export const config = {
   geminiRetryDelaysMs: [800, 2000],
   /** Largest product photo accepted by Add Product. */
   maxUploadBytes: 8 * MB,
+  /** Photos of one product that can be read together. */
+  maxPhotos: 6,
   /** Largest backup file accepted by Restore. */
   maxBackupBytes: 50 * MB,
   /** How alike two product names must be (0–1) to be offered as "the same product". */

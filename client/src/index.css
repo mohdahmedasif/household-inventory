@@ -899,6 +899,70 @@ body {
   color: var(--pantry-muted);
 }
 
+.photo-area {
+  min-width: 0;
+}
+
+.photo-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 10px;
+}
+
+.photo-thumb {
+  position: relative;
+  aspect-ratio: 1;
+  overflow: hidden;
+  border: 1px solid var(--pantry-border);
+  border-radius: var(--pantry-radius-sm);
+  background: var(--pantry-surface);
+}
+
+.photo-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.photo-thumb button {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--pantry-ink) 70%, transparent);
+  color: var(--pantry-on-primary);
+  cursor: pointer;
+}
+
+.photo-strip .ant-upload-wrapper,
+.photo-strip .ant-upload {
+  display: block;
+  height: 100%;
+}
+
+.photo-add {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  height: 100%;
+  aspect-ratio: 1;
+  border: 1.5px dashed var(--pantry-border-strong);
+  border-radius: var(--pantry-radius-sm);
+  background: var(--pantry-sunken);
+  color: var(--pantry-muted);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
 .extract-preview {
   display: flex;
   flex-direction: column;
@@ -1167,9 +1231,10 @@ body {
 }
 
 .history-list li {
-  display: flex;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
   align-items: baseline;
-  gap: 12px;
+  gap: 4px 12px;
   padding: 9px 0;
   border-bottom: 1px solid var(--pantry-border);
 }
@@ -1194,9 +1259,9 @@ body {
 
 .history-what {
   display: grid;
-  flex: 1;
   gap: 2px;
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .history-what > span {
@@ -1983,5 +2048,93 @@ button.more-link {
   .item-card .expiry-pill {
     padding: 2px 8px;
     font-size: 11px;
+  }
+}
+
+/* ---------- Product page on a phone ---------- */
+
+.batch-cards {
+  display: grid;
+  gap: 10px;
+}
+
+.batch-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--pantry-border);
+  border-radius: var(--pantry-radius-sm);
+  background: var(--pantry-surface);
+}
+
+.batch-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.batch-card-title {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.batch-card-title span {
+  color: var(--pantry-muted);
+  font-size: 13px;
+}
+
+.batch-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  color: var(--pantry-muted);
+  font-size: 13px;
+}
+
+.batch-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--pantry-border);
+}
+
+.batch-card-foot .ant-btn {
+  width: 40px;
+  height: 40px;
+}
+
+@media (max-width: 767px) {
+  /* The date and who made the change go under the entry, not beside it. */
+  .history-list li {
+    grid-template-columns: 40px minmax(0, 1fr);
+  }
+
+  .history-when {
+    grid-column: 2;
+    justify-items: start;
+    white-space: normal;
+  }
+
+  /* 16px keeps iPhones from zooming in on these fields too. */
+  .ant-input-number .ant-input-number-input,
+  .ant-select .ant-select-selection-search-input,
+  .ant-select .ant-select-selection-item,
+  .ant-picker .ant-picker-input > input {
+    font-size: 16px;
+  }
+
+  .more-fields.ant-collapse > .ant-collapse-item > .ant-collapse-header {
+    min-height: 40px;
+    align-items: center;
+  }
+
+  .history-when .ant-btn {
+    height: 36px;
+    padding-inline: 14px;
   }
 }

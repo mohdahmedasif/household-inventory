@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { App as AntdApp, Button, Input, Segmented, Select, Skeleton } from "antd";
 import { ClockCircleOutlined, SearchOutlined, ShoppingOutlined } from "@ant-design/icons";
@@ -52,8 +52,18 @@ export default function ItemsPage() {
     }
   };
 
+  // Search and company filter as you type, a moment after the last key.
+  const typing = useRef<ReturnType<typeof setTimeout> | null>(null);
+  function loadSoon(params: { q: string; location: string | undefined; company: string | undefined }) {
+    if (typing.current) clearTimeout(typing.current);
+    typing.current = setTimeout(() => void load(params), 300);
+  }
+
   useEffect(() => {
     void load();
+    return () => {
+      if (typing.current) clearTimeout(typing.current);
+    };
   }, []);
 
   const categoryCounts = useMemo(() => {
@@ -85,7 +95,7 @@ export default function ItemsPage() {
           value={q}
           onChange={(e) => {
             setQ(e.target.value);
-            if (!e.target.value) void load({ q: "", location, company: company || undefined });
+            loadSoon({ q: e.target.value, location, company: company || undefined });
           }}
           onPressEnter={() => void load()}
         />
@@ -109,7 +119,7 @@ export default function ItemsPage() {
           value={company}
           onChange={(e) => {
             setCompany(e.target.value);
-            if (!e.target.value) void load({ q, location, company: undefined });
+            loadSoon({ q, location, company: e.target.value || undefined });
           }}
           onPressEnter={() => void load()}
         />
