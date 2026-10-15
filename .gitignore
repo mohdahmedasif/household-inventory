@@ -45,3 +45,6 @@ inventory-export*
 inventory-backup*.json
 **/inventory-backup*.json
 before-last-restore*.json
+
+# Crash dumps from Git for Windows tools
+*.stackdump
