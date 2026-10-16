@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   Alert,
   App as AntdApp,
@@ -47,6 +47,7 @@ import {
   extractFromImages,
   fetchCatalog,
   fetchCompanies,
+  fetchGeminiKeys,
   fetchProduct,
   fetchProductEvents,
   fetchProducts,
@@ -136,6 +137,8 @@ export default function ItemFormPage() {
   const [events, setEvents] = useState<StockEvent[]>([]);
   const [companies, setCompanies] = useState<string[]>([]);
   const [moreOpen, setMoreOpen] = useState(false);
+  // null while checking; false when no usable Gemini key is saved.
+  const [canReadPhotos, setCanReadPhotos] = useState<boolean | null>(null);
   const addAnother = useRef(false);
   usePageTitle(editing ? product?.name : undefined);
   // Below tablet width each purchase is a card instead of a table row.
@@ -273,6 +276,9 @@ export default function ItemFormPage() {
         fetchCompanies()
           .then(({ companies: rows }) => setCompanies(rows.map((row) => row.name)))
           .catch(() => setCompanies([]));
+        fetchGeminiKeys()
+          .then(({ keys }) => setCanReadPhotos(keys.some((key) => key.readable)))
+          .catch(() => setCanReadPhotos(null));
         if (editing && productId) {
           await reload(productId);
         } else {
@@ -706,6 +712,14 @@ export default function ItemFormPage() {
               <h2>Scan a label</h2>
               <p>Gemini reads the photo and fills the fields below for review.</p>
             </div>
+            {canReadPhotos === false ? (
+              <Alert
+                type="warning"
+                showIcon
+                message="Photo reading is off: no Gemini API key is saved."
+                description={<Link to="/settings">Add one in Settings → Gemini API keys</Link>}
+              />
+            ) : null}
             <div className="extract-zone">
               <div className="photo-area">
                 {photos.length ? (
@@ -728,7 +742,7 @@ export default function ItemFormPage() {
                         accept="image/*"
                         multiple
                         showUploadList={false}
-                        disabled={extracting}
+                        disabled={extracting || canReadPhotos === false}
                         beforeUpload={(file, fileList) => {
                           if (file === fileList[fileList.length - 1]) void addPhotos(fileList);
                           return false;
@@ -746,7 +760,7 @@ export default function ItemFormPage() {
                     accept="image/*"
                     multiple
                     showUploadList={false}
-                    disabled={extracting}
+                    disabled={extracting || canReadPhotos === false}
                     beforeUpload={(file, fileList) => {
                       if (file === fileList[fileList.length - 1]) void addPhotos(fileList);
                       return false;
@@ -776,7 +790,7 @@ export default function ItemFormPage() {
                     capture="environment"
                     multiple={false}
                     showUploadList={false}
-                    disabled={extracting || photos.length >= maxPhotos}
+                    disabled={extracting || photos.length >= maxPhotos || canReadPhotos === false}
                     beforeUpload={(file) => {
                       void addPhotos([file]);
                       return false;
@@ -787,7 +801,7 @@ export default function ItemFormPage() {
                       size="large"
                       icon={<CameraOutlined />}
                       loading={extracting}
-                      disabled={photos.length >= maxPhotos}
+                      disabled={photos.length >= maxPhotos || canReadPhotos === false}
                       block
                     >
                       {extracting ? "Reading…" : photos.length ? "Take another photo" : "Take photo"}

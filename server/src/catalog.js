@@ -137,7 +137,9 @@ export function sentenceCase(value) {
  * in the lowercase_units setting stay as is.
  */
 export function titleCase(value, lowercaseUnits = []) {
-  return String(value ?? "").replace(/[\p{L}\p{N}'’]+/gu, (word) => {
+  // Trailing dots or an ellipsis (some logos, like "tegut…", end in one) are not part of a name.
+  return String(value ?? "")
+    .replace(/[\s.…]+$/u, "").replace(/[\p{L}\p{N}'’]+/gu, (word) => {
     if (lowercaseUnits.includes(word) || word !== word.toLowerCase()) return word;
     return word.charAt(0).toUpperCase() + word.slice(1);
   });

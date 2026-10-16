@@ -7,8 +7,10 @@ import { blankIfPlaceholder } from "./validate.js";
 // never names a particular category, location, package type or brand.
 function buildInstruction(categories, locations, packageTypes, sizeUnits, settings) {
   return [
-    "Extract one household inventory item (food, drink, medicine, supplement or household supply) into a JSON object with keys: name, brand, category, location, package_type, package_count, units_per_package, size_value, size_unit, expiry_date, notes.",
-    `name MUST be a real, concrete product name in ${settings.extract_language} (translate from the label or the user's text if needed). Use the product name printed on the label; if only a generic name or active ingredient is known, use that. Never use a placeholder.`,
+    "Extract one household inventory item (food, drink, medicine, supplement or household supply) into a JSON object with keys: name, batch_note, brand, category, location, package_type, package_count, units_per_package, size_value, size_unit, expiry_date, notes.",
+    `Write every text field in ${settings.extract_language}, translating from the label or the user's text where needed.`,
+    "name MUST be the plain generic name of the product, as you would write it on a shopping list (for example 'Olives', 'Orange Juice', 'Paracetamol Tablets'): no brand, no variety or preparation words. For a medicine use the generic name or active ingredient plus its form. Never use a placeholder.",
+    "batch_note = the variety or preparation that sets this purchase apart, in a few words (for example 'Sliced', 'Pitted', 'Minced', 'Plump', 'No added sugar'); leave blank if there is none.",
     "brand = the manufacturer or company if it can be identified from the text or label; otherwise leave blank.",
     `category MUST be exactly one of the allowed categories. Pick the closest match and never invent a new one; if nothing fits, use "${settings.default_category}".`,
     `location MUST be exactly one of the allowed locations. Pick the most plausible place for this kind of item unless the text says where it is kept; if unsure, use "${settings.default_location}".`,
@@ -61,6 +63,7 @@ function buildSchema(categories, locations, packageTypes, sizeUnits) {
       size_unit: { type: "string", enum: [...sizeUnits, ""] },
       expiry_date: { type: "string" },
       notes: { type: "string" },
+      batch_note: { type: "string" },
     },
     required: [
       "name",
@@ -74,6 +77,7 @@ function buildSchema(categories, locations, packageTypes, sizeUnits) {
       "size_unit",
       "expiry_date",
       "notes",
+      "batch_note",
     ],
   };
 }
@@ -106,7 +110,7 @@ function normalizeDraft(raw, catalog, settings) {
       ) ?? "",
     expiry_date: coerceExpiry(raw?.expiry_date, settings.blank_words),
     notes: sentenceCase(blank(raw?.notes)),
-    batch_notes: "",
+    batch_notes: sentenceCase(blank(raw?.batch_note)),
   };
 }
 

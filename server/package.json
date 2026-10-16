@@ -9,11 +9,11 @@
     "test": "node --test"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "dependencies": {
     "@google/genai": "^2.27.0",
-    "better-sqlite3": "^11.10.0",
+    "better-sqlite3": "^13.0.3",
     "express": "^4.21.2",
     "multer": "^2.4.0"
   },

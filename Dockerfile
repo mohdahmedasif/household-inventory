@@ -9,7 +9,7 @@ RUN npm run build
 
 FROM node:22-bookworm-slim
 WORKDIR /app
-COPY server/package.json ./
+COPY server/package.json server/.npmrc ./
 RUN npm install --omit=dev
 COPY server/src ./src
 COPY --from=client /src/client/dist ./dist

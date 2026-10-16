@@ -2,7 +2,7 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-3D6B4F" alt="MIT License"></a>
-  <img src="https://img.shields.io/badge/node-%3E%3D20-339933" alt="Node 20+">
+  <img src="https://img.shields.io/badge/node-%3E%3D22-339933" alt="Node 22+">
   <img src="https://img.shields.io/badge/react-19-61DAFB" alt="React 19">
   <img src="https://img.shields.io/badge/sqlite-local-0f766e" alt="SQLite">
   <a href="https://github.com/mohdahmedasif/household-inventory/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22"><img src="https://img.shields.io/badge/good%20first%20issue-welcome-7057ff" alt="Good first issues"></a>
@@ -41,7 +41,7 @@ In **production / Docker**, Express serves the built SPA and API from one proces
 
 ## Quick start
 
-**Requirements:** Node.js 20+. Optional: a [Gemini API key](https://aistudio.google.com/) for photo extract.
+**Requirements:** Node.js 22+. Optional: a [Gemini API key](https://aistudio.google.com/) for photo extract.
 
 ```bash
 git clone https://github.com/mohdahmedasif/household-inventory.git
